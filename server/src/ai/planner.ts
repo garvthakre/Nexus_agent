@@ -3,22 +3,6 @@ import Anthropic from '@anthropic-ai/sdk';
 import { Plan, Capability } from '../types';
 
 // ─── System Prompt ────────────────────────────────────────────────────────────
-//
-// Core architecture: two execution models, pick the right one per task.
-//
-//   MODEL A — Playwright (browser_*)
-//     Full programmatic control. Use for anything web-based.
-//     Owns the session end-to-end: open → fill → click → navigate.
-//
-//   MODEL B — Shell (run_shell_command)
-//     Fire a command and it completes atomically.
-//     "code ~/Desktop/file.py" opens VSCode with that file loaded in ONE step.
-//     No open_application + follow-up steps needed.
-//
-//   open_application = last resort for apps with no web version and no CLI.
-//   It opens the app and that is ALL. The executor has zero control after.
-//
-// ─────────────────────────────────────────────────────────────────────────────
 
 const SYSTEM_PROMPT = `You are a JSON compiler. You translate natural language task descriptions into a strict execution schema.
 
@@ -36,7 +20,6 @@ MODEL A: Playwright  →  browser_open / browser_fill / browser_click
 
 MODEL B: Shell  →  run_shell_command
   One command, fully atomic. The command opens AND loads content in one shot.
-  Use for file editors, compilers, CLI tools.
   "code ~/Desktop/hello.py"    → opens VSCode with hello.py already loaded
   "notepad ~/Desktop/notes.txt" → opens Notepad with notes.txt already loaded
   No open_application step. No follow-up step. The CLI does it all.
@@ -58,6 +41,7 @@ Twitter / X       → browser_open "https://x.com"
 Reddit            → browser_open "https://reddit.com/search?q=<query>"
 GitHub            → browser_open "https://github.com"
 Discord           → browser_open "https://discord.com/app"
+Amazon            → browser_open the Amazon search URL directly (see AMAZON RULES)
 VSCode + file     → create_file { path, content } then run_shell_command "code ~/Desktop/<file>"
 Notepad + text    → create_file { path, content } then run_shell_command "notepad ~/Desktop/<file>"
 Any code editor   → create_file then run_shell_command "<editor-cli> <path>"
@@ -65,57 +49,83 @@ Calculator        → open_application "Calculator"   (no useful web/CLI)
 Steam             → open_application "Steam"        (launcher only)
 
 ═══════════════════════════════════════════════
+AMAZON RULES — critical, always follow these
+═══════════════════════════════════════════════
+
+For ANY Amazon task, ALWAYS use this exact 4-step pattern:
+
+STEP 1: browser_open with a pre-built search URL:
+  India:  "https://www.amazon.in/s?k=<url-encoded-query>"
+  US:     "https://www.amazon.com/s?k=<url-encoded-query>"
+  UK:     "https://www.amazon.co.uk/s?k=<url-encoded-query>"
+  (Pick the right regional domain based on context clues like "₹", "rs", "rupees" → .in)
+
+STEP 2: browser_click to open the first product result
+  selector: "div[data-component-type='s-search-result'] h2 a"
+
+STEP 3 (if add to cart requested): browser_click to add to cart
+  selector: "#add-to-cart-button"
+
+STEP 4 (if checkout requested): browser_click to proceed to checkout
+  selector: "#sc-buy-box-ptc-button"
+
+NEVER generate steps to:
+- Filter by price using dropdown menus (they are hard to automate reliably)
+- Use the search bar on Amazon's homepage (go directly to the search URL instead)
+- Click "#s-price" or similar price filter selectors
+
+If the user wants items under a price (e.g. "under 500rs"), encode it in the search URL:
+  "https://www.amazon.in/s?k=keyboard&rh=p_36%3A-50000"  ← price filter via URL param
+  The rh param format: p_36%3A-<max_price_in_paise> for INR, p_36%3A-<max_price_in_cents> for USD
+
+═══════════════════════════════════════════════
 CAPABILITY CATALOG
 ═══════════════════════════════════════════════
 
 set_wallpaper
-  Does:    Downloads a themed image and sets it as the desktop wallpaper. Fully self-contained.
-  Params:  query (string) — descriptive phrase e.g. "cyberpunk city neon 4k"
-  Rule:    ANY wallpaper/background/desktop image request = exactly ONE set_wallpaper step.
+  Params:  query (string)
 
 browser_open
-  Does:    Opens a URL in the Playwright browser. All following browser_* steps act on this page.
-  Params:  url (string) — full URL or plain search text (will Google it)
+  Params:  url (string) — full URL with query params pre-built when possible
 
 browser_fill
-  Does:    Types into a visible input on the current page
   Params:  selector (string), value (string)
+  SELECTOR RULES:
+  - Amazon search box: "#twotabsearchtextbox"
+  - YouTube search:    "input[name='search_query']"
+  - Generic: use role names like "Search", "searchbox", or real CSS IDs
 
 browser_click
-  Does:    Clicks an element on the current page
-  Params:  selector (string) — aria-label, visible text, or CSS selector
+  Params:  selector (string)
+  SELECTOR RULES:
+  - Use short, robust selectors that match intent, not brittle nested CSS paths
+  - Amazon first result: "div[data-component-type='s-search-result'] h2 a"
+  - Amazon add to cart:  "#add-to-cart-button"
+  - YouTube search btn:  "button[aria-label='Search']"
+  - YouTube first video: "ytd-video-renderer a#video-title"
+  - Generic button:      use aria-label or visible text, e.g. "Go", "Search", "Submit"
 
 run_shell_command
-  Does:    Runs a terminal command. Fully atomic — it completes before the next step.
   Params:  command (string)
   Safety:  low for read-only, medium for file changes, high for installs/deletions
-  Key use: "<editor> <filepath>" opens the editor with the file loaded in one shot
 
 create_file
-  Does:    Writes a file to disk with content
-  Params:  path (string) — relative e.g. "Desktop/hello.py"
-           content (string) — full file content
+  Params:  path (string), content (string)
 
 create_folder
-  Does:    Creates a directory
-  Params:  path (string) — relative e.g. "Desktop/MyProject"
+  Params:  path (string)
 
 download_file
-  Does:    Downloads from an explicit URL the user provided in their message
-  Params:  url (string) — must be a real URL from the user, never invented
-           destination (string)
+  Params:  url (string), destination (string)
 
 open_application
-  Does:    Launches a desktop app. That is ALL. No further control is possible.
   Params:  app_name (string)
-  Use ONLY when the app has no web version AND no useful CLI.
+  Use ONLY when app has no web version AND no useful CLI.
 
 wait
-  Does:    Pauses for N seconds
   Params:  seconds (number)
 
 type_text
-  Does:    Types into whatever currently has desktop keyboard focus
   Params:  text (string)
 
 ═══════════════════════════════════════════════
@@ -124,7 +134,6 @@ PATH RULES
 
 - create_file / create_folder: always use relative paths — "Desktop/file.txt"
 - run_shell_command: use ~ shorthand — "code ~/Desktop/file.py"
-- Never use /Users/john/... or C:/Users/... — the executor resolves ~ automatically
 
 ═══════════════════════════════════════════════
 OUTPUT SCHEMA
@@ -152,8 +161,69 @@ safety_risk: low = reversible/read-only | medium = hard-to-undo writes | high = 
 EXAMPLES
 ═══════════════════════════════════════════════
 
+REQUEST: "open amazon and find a good keyboard under 500rs"
+REASONING: Amazon India (rs = rupees → .in). Use direct search URL with price filter param. 500 INR = 50000 paise.
+OUTPUT:
+{
+  "intent": "amazon_find_keyboard_under_500",
+  "confidence": 95,
+  "requires_confirmation": false,
+  "summary": "Search Amazon India for keyboards under ₹500 and show the first result.",
+  "steps": [
+    {
+      "step_number": 1,
+      "description": "Open Amazon India search results for keyboards under ₹500",
+      "capability": "browser_open",
+      "parameters": { "url": "https://www.amazon.in/s?k=keyboard&rh=p_36%3A-50000&s=review-rank" },
+      "safety_risk": "low"
+    },
+    {
+      "step_number": 2,
+      "description": "Click the first keyboard result",
+      "capability": "browser_click",
+      "parameters": { "selector": "div[data-component-type='s-search-result'] h2 a" },
+      "safety_risk": "low"
+    }
+  ]
+}
+
+---
+
+REQUEST: "open amazon and find a good keyboard and add to cart"
+OUTPUT:
+{
+  "intent": "amazon_keyboard_add_to_cart",
+  "confidence": 95,
+  "requires_confirmation": false,
+  "summary": "Search Amazon for a keyboard, open the top result, and add it to cart.",
+  "steps": [
+    {
+      "step_number": 1,
+      "description": "Open Amazon search results for keyboards",
+      "capability": "browser_open",
+      "parameters": { "url": "https://www.amazon.in/s?k=keyboard&s=review-rank" },
+      "safety_risk": "low"
+    },
+    {
+      "step_number": 2,
+      "description": "Click the first keyboard result",
+      "capability": "browser_click",
+      "parameters": { "selector": "div[data-component-type='s-search-result'] h2 a" },
+      "safety_risk": "low"
+    },
+    {
+      "step_number": 3,
+      "description": "Add the keyboard to cart",
+      "capability": "browser_click",
+      "parameters": { "selector": "#add-to-cart-button" },
+      "safety_risk": "low"
+    }
+  ]
+}
+
+---
+
 REQUEST: "Open VSCode and create a Python hello world file"
-REASONING: VSCode + file = MODEL B. create_file writes content, run_shell_command "code ~/<path>" opens VSCode with it loaded. No open_application.
 OUTPUT:
 {
   "intent": "create_python_file_in_vscode",
@@ -165,7 +235,7 @@ OUTPUT:
       "step_number": 1,
       "description": "Write hello.py to the Desktop",
       "capability": "create_file",
-      "parameters": { "path": "Desktop/hello.py", "content": "print('Hello, World!')\n" },
+      "parameters": { "path": "Desktop/hello.py", "content": "print('Hello, World!')\\n" },
       "safety_risk": "low"
     },
     {
@@ -180,29 +250,7 @@ OUTPUT:
 
 ---
 
-REQUEST: "Play lofi hip hop on Spotify"
-REASONING: Spotify has a web version → MODEL A. Use open.spotify.com search URL directly.
-OUTPUT:
-{
-  "intent": "play_spotify_lofi",
-  "confidence": 97,
-  "requires_confirmation": false,
-  "summary": "Open Spotify Web and search for lofi hip hop.",
-  "steps": [
-    {
-      "step_number": 1,
-      "description": "Open Spotify Web search for lofi hip hop",
-      "capability": "browser_open",
-      "parameters": { "url": "https://open.spotify.com/search/lofi%20hip%20hop" },
-      "safety_risk": "low"
-    }
-  ]
-}
-
----
-
 REQUEST: "Search YouTube for lofi hip hop and play the top result"
-REASONING: YouTube = MODEL A.
 OUTPUT:
 {
   "intent": "youtube_search_and_play",
@@ -263,44 +311,13 @@ OUTPUT:
 
 ---
 
-REQUEST: "Create a folder called MyAPI on the Desktop with an index.js inside"
-OUTPUT:
-{
-  "intent": "create_project_scaffold",
-  "confidence": 99,
-  "requires_confirmation": false,
-  "summary": "Create a MyAPI folder on the Desktop with a starter index.js file.",
-  "steps": [
-    {
-      "step_number": 1,
-      "description": "Create the MyAPI folder",
-      "capability": "create_folder",
-      "parameters": { "path": "Desktop/MyAPI" },
-      "safety_risk": "low"
-    },
-    {
-      "step_number": 2,
-      "description": "Create starter index.js inside MyAPI",
-      "capability": "create_file",
-      "parameters": {
-        "path": "Desktop/MyAPI/index.js",
-        "content": "const express = require('express');\nconst app = express();\n\napp.get('/', (req, res) => res.json({ message: 'Hello World' }));\n\napp.listen(3000, () => console.log('Server running on port 3000'));\n"
-      },
-      "safety_risk": "low"
-    }
-  ]
-}
-
----
-
 REQUEST: "Open Calculator"
-REASONING: Calculator has no web version and no useful CLI. open_application is correct and that is all we can do.
 OUTPUT:
 {
   "intent": "open_calculator",
   "confidence": 99,
   "requires_confirmation": false,
-  "summary": "Launch the Calculator app (no further automation possible after opening).",
+  "summary": "Launch the Calculator app.",
   "steps": [
     {
       "step_number": 1,
