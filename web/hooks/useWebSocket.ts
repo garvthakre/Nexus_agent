@@ -5,13 +5,17 @@ import { WsMessage } from '@/types'
 type Listener = (data: WsMessage) => void
 
 export function useWebSocket(url: string) {
-  const wsRef = useRef<WebSocket | null>(null)
+  const wsRef             = useRef<WebSocket | null>(null)
   const [connected, setConnected] = useState(false)
   const [lastMessage, setLastMessage] = useState<WsMessage | null>(null)
-  const listenersRef = useRef<Listener[]>([])
-  const reconnectTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const listenersRef      = useRef<Map<symbol, Listener>>(new Map())
+  const reconnectTimer    = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const mountedRef        = useRef(false)
 
   const connect = useCallback(() => {
+    // Don't open a second socket if one already exists and is open/connecting
+    if (wsRef.current && wsRef.current.readyState <= WebSocket.OPEN) return
+
     try {
       const ws = new WebSocket(url)
       wsRef.current = ws
@@ -25,7 +29,10 @@ export function useWebSocket(url: string) {
         try {
           const data = JSON.parse(event.data) as WsMessage
           setLastMessage(data)
-          listenersRef.current.forEach((fn) => fn(data))
+          // Iterate over a snapshot so unsubscribes during dispatch are safe
+          for (const fn of Array.from(listenersRef.current.values())) {
+            fn(data)
+          }
         } catch (e) {
           console.error('[WS] Parse error', e)
         }
@@ -33,6 +40,7 @@ export function useWebSocket(url: string) {
 
       ws.onclose = () => {
         setConnected(false)
+        wsRef.current = null
         console.log('[WS] Disconnected, reconnecting in 3s...')
         reconnectTimer.current = setTimeout(connect, 3000)
       }
@@ -48,19 +56,29 @@ export function useWebSocket(url: string) {
   }, [url])
 
   useEffect(() => {
+    // Guard against React StrictMode double-invoke
+    if (mountedRef.current) return
+    mountedRef.current = true
+
     connect()
+
     return () => {
+      mountedRef.current = false
       if (reconnectTimer.current) clearTimeout(reconnectTimer.current)
       wsRef.current?.close()
+      wsRef.current = null
     }
   }, [connect])
 
-  /** Register a listener; returns an unsubscribe function */
+  /**
+   * Register a listener. Returns an unsubscribe function.
+   * Uses a Symbol key so each call gets a unique slot — no accidental dedup
+   * of two different handlers that happen to be the same function reference.
+   */
   const subscribe = useCallback((fn: Listener): (() => void) => {
-    listenersRef.current.push(fn)
-    return () => {
-      listenersRef.current = listenersRef.current.filter((l) => l !== fn)
-    }
+    const key = Symbol()
+    listenersRef.current.set(key, fn)
+    return () => { listenersRef.current.delete(key) }
   }, [])
 
   const send = useCallback((data: unknown) => {
