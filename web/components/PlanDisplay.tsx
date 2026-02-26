@@ -18,6 +18,7 @@ const CAPABILITY_ICONS: Record<Capability, string> = {
   create_file:       '📄',
   create_folder:     '📁',
   wait:              '⏳',
+  download_file:     '⬇️',
 }
 
 const RISK_CLASSES: Record<SafetyRisk, string> = {
@@ -275,9 +276,21 @@ function StepCard({ step, status, result }: StepCardProps) {
           {result && (
             <div>
               <span className="text-dim text-xs font-mono">RESULT:</span>
-              <pre className="text-xs font-mono text-accent3 mt-1 bg-surface3 p-2 rounded overflow-auto max-h-24">
+              <pre className="text-xs font-mono text-accent3 mt-1 bg-surface3 p-2 rounded overflow-auto max-h-32">
                 {JSON.stringify(result, null, 2)}
               </pre>
+              {/* Show warning in orange if present */}
+              {result.warning && (
+                <div className="mt-1 text-xs font-mono text-warn bg-warn/5 border border-warn/20 rounded p-2">
+                   {result.warning}
+                </div>
+              )}
+              {/* Show path as clickable hint if present */}
+              {result.path && (
+                <div className="mt-1 text-xs font-mono text-accent3">
+                   {result.path}
+                </div>
+              )}
             </div>
           )}
         </div>
