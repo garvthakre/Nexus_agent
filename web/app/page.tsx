@@ -84,17 +84,35 @@ export default function HomePage() {
           break
 
         case 'safety_check':
-          addEvent('safety_check', `High-risk step ${data.stepNumber}: ${data.message}`)
+          addEvent('safety_check', data.message ?? '')
           break
 
-        case 'execution_complete':
-          addEvent('execution_complete', `Complete! ${data.summary?.success}/${data.summary?.total} steps succeeded`)
+        case 'execution_complete': {
+          const total = data.summary?.total ?? 0
+          const success = data.summary?.success ?? 0
+          addEvent('execution_complete', `Complete! ${success}/${total} steps succeeded`)
+
+          // Build the full completedSteps list from the summary so the UI
+          // always reflects the final state — avoids the "1/4" flash that
+          // happens when execution_complete arrives before all step_complete
+          // events have been processed by React.
+          const allStepNumbers = Array.from({ length: total }, (_, i) => i + 1)
+
           setExecutionState((prev) => ({
             ...prev,
             status: 'completed',
+            currentStep: null,
+            // Mark every step that succeeded as complete. We derive this from
+            // the results array if present, falling back to prev.completedSteps.
+            completedSteps: data.results
+              ? data.results.filter(r => r.success).map(r => r.stepNumber)
+              : allStepNumbers.slice(0, success),
+            // Persist any step results that came in via step_complete events
+            stepResults: prev.stepResults,
             summary: data.summary ?? null,
           }))
           break
+        }
 
         case 'execution_failed':
           addEvent('execution_failed', `Failed at step ${data.stepNumber}: ${data.error}`)
