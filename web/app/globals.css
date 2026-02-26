@@ -1,26 +1,129 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --background: #0a0a0f;
+  --foreground: #ededed;
+
+  /* Surface colors */
+  --color-surface:  #0f0f17;
+  --color-surface2: #13131e;
+  --color-surface3: #1a1a28;
+
+  /* Border */
+  --color-border: rgba(255, 255, 255, 0.08);
+
+  /* Text shades */
+  --color-muted: #6b7280;
+  --color-dim:   #374151;
+
+  /* Brand / accent */
+  --color-accent:  #00d4ff;
+  --color-accent2: #7c3aed;
+  --color-accent3: #10b981;
+
+  /* Status */
+  --color-danger: #ef4444;
+  --color-warn:   #f59e0b;
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+
+  --color-surface:  var(--color-surface);
+  --color-surface2: var(--color-surface2);
+  --color-surface3: var(--color-surface3);
+
+  --color-border: var(--color-border);
+
+  --color-muted: var(--color-muted);
+  --color-dim:   var(--color-dim);
+
+  --color-accent:  var(--color-accent);
+  --color-accent2: var(--color-accent2);
+  --color-accent3: var(--color-accent3);
+
+  --color-danger: var(--color-danger);
+  --color-warn:   var(--color-warn);
+
+  --font-sans:    var(--font-geist-sans);
+  --font-mono:    var(--font-geist-mono);
+  --font-display: var(--font-geist-sans);
+
+  /* Custom animations */
+  --animate-pulse-slow: pulse-slow 3s ease-in-out infinite;
+  --animate-fade-in:    fade-in 0.2s ease-out;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+@keyframes pulse-slow {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.4; }
+}
+
+@keyframes fade-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes blink {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0; }
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
+}
+
+/* Ambient background grid */
+.ambient-bg {
+  background-color: var(--background);
+  background-image:
+    linear-gradient(rgba(0, 212, 255, 0.03) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(0, 212, 255, 0.03) 1px, transparent 1px);
+  background-size: 40px 40px;
+}
+
+/* Scan line overlay */
+.scan-line {
+  position: fixed;
+  top: 0; left: 0; right: 0;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, rgba(0, 212, 255, 0.4), transparent);
+  animation: scan 6s linear infinite;
+  pointer-events: none;
+  z-index: 9999;
+}
+
+@keyframes scan {
+  0%   { top: 0%; }
+  100% { top: 100%; }
+}
+
+/* Shimmer loading effect */
+.shimmer {
+  background: linear-gradient(
+    90deg,
+    var(--color-surface2) 25%,
+    var(--color-surface3) 50%,
+    var(--color-surface2) 75%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.5s infinite;
+}
+
+@keyframes shimmer {
+  0%   { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+/* Progress glow */
+.progress-glow {
+  box-shadow: 0 0 8px rgba(0, 212, 255, 0.6);
+}
+
+/* Cursor blink */
+.cursor-blink {
+  animation: blink 1s step-end infinite;
 }
