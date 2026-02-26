@@ -75,6 +75,14 @@ export interface StepResult {
   [key: string]: unknown
 }
 
+export interface StepExecutionResult {
+  stepNumber: number
+  success: boolean
+  result?: StepResult
+  error?: string
+  duration?: number
+}
+
 export interface ExecutionSummary {
   total: number
   success: number
@@ -115,6 +123,8 @@ export interface WsMessage {
   step?: PlanStep
   stepNumber?: number
   result?: StepResult
+  // Sent with execution_complete — the full per-step result array
+  results?: StepExecutionResult[]
   totalSteps?: number
   duration?: number
   error?: string
