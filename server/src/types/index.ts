@@ -10,7 +10,8 @@ export type Capability =
   | 'type_text'
   | 'create_file'
   | 'create_folder'
-  | 'wait';
+  | 'wait'
+  | 'download_file';
 
 export type SafetyRisk = 'low' | 'medium' | 'high';
 
@@ -23,6 +24,7 @@ export interface StepParameters {
   value?: string;
   text?: string;
   path?: string;
+  destination?: string;
   content?: string;
   seconds?: number;
 }
@@ -78,6 +80,7 @@ export interface StepResult {
   title?: string;
   path?: string;
   warning?: string;
+  downloadedFrom?: string;
   [key: string]: unknown;
 }
 
