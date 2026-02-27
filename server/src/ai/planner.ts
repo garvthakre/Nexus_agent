@@ -24,29 +24,49 @@ MODEL B: Shell  →  run_shell_command
   "notepad ~/Desktop/notes.txt" → opens Notepad with notes.txt already loaded
   No open_application step. No follow-up step. The CLI does it all.
 
-DECISION RULE for "open X and do Y":
-  X has a web version?  → MODEL A (see App Routing Table below)
+MODEL C: open_application  →  native desktop app launcher
+  Use ONLY when the user explicitly says "app", "desktop app", "open the app",
+  or when the app has no useful web version AND no useful CLI.
+
+DECISION RULE for "open X":
+  User says "app" / "desktop app" / "installed app"?  → MODEL C (open_application)
+  X has a web version AND user did NOT say "app"?      → MODEL A (browser)
   X is a file editor?   → MODEL B: create_file then run_shell_command "code <path>"
   X is a pure launcher? → open_application only (no further control possible)
 
+CRITICAL — APP vs WEB OVERRIDE:
+  If the user's message contains the word "app", "application", "desktop", or
+  "installed", ALWAYS prefer open_application over browser_open for that app.
+  Example: "open whatsapp app" → open_application "WhatsApp"
+  Example: "open whatsapp"     → browser_open "https://web.whatsapp.com"
+
 ═══════════════════════════════════════════════
-APP ROUTING TABLE — always follow this
+APP ROUTING TABLE — follow by default, override if user says "app"
 ═══════════════════════════════════════════════
 
 Spotify           → browser_open "https://open.spotify.com/search/<query>"
+                    UNLESS user says "app" → open_application "Spotify"
 YouTube / YT Music→ browser_open "https://www.youtube.com" then search
 WhatsApp          → browser_open "https://web.whatsapp.com"
+                    UNLESS user says "app" / "whatsapp app" → open_application "WhatsApp"
 Gmail             → browser_open "https://mail.google.com"
 Twitter / X       → browser_open "https://x.com"
 Reddit            → browser_open "https://reddit.com/search?q=<query>"
 GitHub            → browser_open "https://github.com"
 Discord           → browser_open "https://discord.com/app"
+                    UNLESS user says "app" → open_application "Discord"
+Telegram          → open_application "Telegram"   (desktop app preferred)
+                    OR browser_open "https://web.telegram.org" if no app
 Amazon            → browser_open the Amazon search URL directly (see AMAZON RULES)
 VSCode + file     → create_file { path, content } then run_shell_command "code ~/Desktop/<file>"
 Notepad + text    → create_file { path, content } then run_shell_command "notepad ~/Desktop/<file>"
 Any code editor   → create_file then run_shell_command "<editor-cli> <path>"
 Calculator        → open_application "Calculator"   (no useful web/CLI)
 Steam             → open_application "Steam"        (launcher only)
+Zoom              → open_application "Zoom"         (desktop app preferred)
+Teams             → open_application "Microsoft Teams"
+Slack             → open_application "Slack"
+                    OR browser_open "https://app.slack.com" if user says "web"
 
 ═══════════════════════════════════════════════
 AMAZON RULES — critical, always follow these
@@ -120,7 +140,8 @@ download_file
 
 open_application
   Params:  app_name (string)
-  Use ONLY when app has no web version AND no useful CLI.
+  Use when: user explicitly says "app"/"desktop app", OR app has no web version,
+            OR app is better as a native client (Telegram, Zoom, Teams, Slack, etc.)
 
 wait
   Params:  seconds (number)
@@ -160,6 +181,66 @@ safety_risk: low = reversible/read-only | medium = hard-to-undo writes | high = 
 ═══════════════════════════════════════════════
 EXAMPLES
 ═══════════════════════════════════════════════
+
+REQUEST: "open whatsapp"
+OUTPUT:
+{
+  "intent": "open_whatsapp_web",
+  "confidence": 95,
+  "requires_confirmation": false,
+  "summary": "Open WhatsApp Web in the browser.",
+  "steps": [
+    {
+      "step_number": 1,
+      "description": "Open WhatsApp Web",
+      "capability": "browser_open",
+      "parameters": { "url": "https://web.whatsapp.com" },
+      "safety_risk": "low"
+    }
+  ]
+}
+
+---
+
+REQUEST: "open whatsapp app"
+OUTPUT:
+{
+  "intent": "open_whatsapp_app",
+  "confidence": 97,
+  "requires_confirmation": false,
+  "summary": "Launch the WhatsApp desktop application.",
+  "steps": [
+    {
+      "step_number": 1,
+      "description": "Launch WhatsApp desktop app",
+      "capability": "open_application",
+      "parameters": { "app_name": "WhatsApp" },
+      "safety_risk": "low"
+    }
+  ]
+}
+
+---
+
+REQUEST: "open spotify app and play jazz"
+OUTPUT:
+{
+  "intent": "open_spotify_app_play_jazz",
+  "confidence": 93,
+  "requires_confirmation": false,
+  "summary": "Launch the Spotify desktop app.",
+  "steps": [
+    {
+      "step_number": 1,
+      "description": "Launch Spotify desktop app",
+      "capability": "open_application",
+      "parameters": { "app_name": "Spotify" },
+      "safety_risk": "low"
+    }
+  ]
+}
+
+---
 
 REQUEST: "open amazon and find a good keyboard under 500rs"
 REASONING: Amazon India (rs = rupees → .in). Use direct search URL with price filter param. 500 INR = 50000 paise.
