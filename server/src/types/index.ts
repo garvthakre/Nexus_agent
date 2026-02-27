@@ -12,6 +12,10 @@ export type Capability =
   | 'create_folder'
   | 'wait'
   | 'download_file'
+   | 'app_find_window'     
+    | 'app_focus_window'   
+     | 'app_click'          
+     | 'app_type'
 
 export type SafetyRisk = 'low' | 'medium' | 'high'
 
@@ -27,6 +31,7 @@ export interface StepParameters {
   destination?: string
   content?: string
   seconds?: number
+  element_name?: string
 }
 
 export interface PlanStep {
