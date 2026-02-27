@@ -1,5 +1,3 @@
- 
-
 import { exec } from 'child_process';
 import * as fs from 'fs/promises';
 import * as fsSync from 'fs';
@@ -131,62 +129,475 @@ async function browserClick(selector: string | undefined): Promise<StepResult> {
   };
 }
 
-// ─── Non-Browser Capabilities ─────────────────────────────────────────────────
+// ─── openApplication — comprehensive multi-strategy launcher ─────────────────
 
 async function openApplication(appName: string | undefined): Promise<StepResult> {
   if (!appName) throw new Error('app_name is required');
   const platform = process.platform;
-  const lo = appName.toLowerCase();
+  const lo = appName.toLowerCase().trim();
 
   if (platform === 'win32') {
-    const WIN_KNOWN: Record<string, string[]> = {
-      chrome:               ['"C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe"'],
-      firefox:              ['"C:\\Program Files\\Mozilla Firefox\\firefox.exe"'],
-      edge:                 ['start microsoft-edge:'],
-      notepad:              ['notepad'],
-      calculator:           ['calc'],
-      paint:                ['mspaint'],
-      cmd:                  ['start cmd'],
-      terminal:             ['start wt'],
-      'windows terminal':   ['start wt'],
-      vscode:               ['code'],
-      'visual studio code': ['code'],
-      spotify:              [`"${os.homedir()}\\AppData\\Roaming\\Spotify\\Spotify.exe"`],
-      discord:              [`"${os.homedir()}\\AppData\\Local\\Discord\\Update.exe" --processStart Discord.exe`],
-      steam:                [`"${os.homedir()}\\AppData\\Local\\Steam\\steam.exe"`],
-    };
-    const candidates: string[] = [];
-    for (const [key, cmds] of Object.entries(WIN_KNOWN)) {
-      if (lo.includes(key) || key.includes(lo)) candidates.push(...cmds);
-    }
-    candidates.push(`start "" "${appName}"`, `powershell -Command "Start-Process '${appName}'"`);
-    for (const cmd of candidates) {
-      try { await execAsync(cmd, { timeout: 8000 }); await sleep(500); return { success: true, message: `Opened ${appName}` }; }
-      catch { /* try next */ }
-    }
-    throw new Error(`Could not open "${appName}"`);
-
+    return openApplicationWindows(appName, lo);
   } else if (platform === 'darwin') {
-    const MAC_KNOWN: Record<string, string> = {
-      chrome: 'Google Chrome', vscode: 'Visual Studio Code', spotify: 'Spotify',
-      discord: 'Discord', terminal: 'Terminal', safari: 'Safari',
-    };
-    const macName = MAC_KNOWN[lo] ?? appName;
-    for (const cmd of [`open -a "${macName}"`, `open -a "${appName}"`]) {
-      try { await execAsync(cmd, { timeout: 8000 }); return { success: true, message: `Opened ${appName}` }; }
-      catch { /* try next */ }
-    }
-    throw new Error(`Could not open "${appName}" on macOS`);
-
+    return openApplicationMac(appName, lo);
   } else {
-    for (const cmd of [lo.replace(/\s+/g, '-'), lo.replace(/\s+/g, ''), lo]) {
-      try { execAsync(`${cmd} &`); await sleep(500); return { success: true, message: `Launched ${appName}` }; }
-      catch { /* try next */ }
-    }
-    await execAsync(`xdg-open "${appName}" &`);
-    return { success: true, message: `Opened ${appName}` };
+    return openApplicationLinux(appName, lo);
   }
 }
+
+// ── Windows launcher ──────────────────────────────────────────────────────────
+
+async function openApplicationWindows(appName: string, lo: string): Promise<StepResult> {
+  const home = os.homedir();
+
+  // ── 1. Known exact paths (fastest) ────────────────────────────────────────
+  const WIN_KNOWN: Record<string, string[]> = {
+    // Browsers
+    chrome:               ['"C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe"',
+                           '"C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe"'],
+    firefox:              ['"C:\\Program Files\\Mozilla Firefox\\firefox.exe"',
+                           '"C:\\Program Files (x86)\\Mozilla Firefox\\firefox.exe"'],
+    edge:                 ['start microsoft-edge:', '"C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe"'],
+    brave:                ['"C:\\Program Files\\BraveSoftware\\Brave-Browser\\Application\\brave.exe"'],
+    opera:                ['"C:\\Users\\' + os.userInfo().username + '\\AppData\\Local\\Programs\\Opera\\opera.exe"'],
+
+    // Productivity
+    notepad:              ['notepad'],
+    calculator:           ['calc'],
+    paint:                ['mspaint'],
+    wordpad:              ['write'],
+    'sticky notes':       ['stikynot'],
+    snipping:             ['snippingtool'],
+    'snipping tool':      ['snippingtool'],
+
+    // Terminals
+    cmd:                  ['start cmd'],
+    terminal:             ['start wt', 'start cmd'],
+    'windows terminal':   ['start wt'],
+    powershell:           ['start powershell'],
+
+    // Editors / Dev
+    vscode:               ['code'],
+    'visual studio code': ['code'],
+    'visual studio':      ['"C:\\Program Files\\Microsoft Visual Studio\\2022\\Community\\Common7\\IDE\\devenv.exe"',
+                           '"C:\\Program Files\\Microsoft Visual Studio\\2022\\Professional\\Common7\\IDE\\devenv.exe"'],
+    notepad2:             ['notepad2'],
+    notepadpp:            ['"C:\\Program Files\\Notepad++\\notepad++.exe"',
+                           '"C:\\Program Files (x86)\\Notepad++\\notepad++.exe"'],
+    'notepad++':          ['"C:\\Program Files\\Notepad++\\notepad++.exe"',
+                           '"C:\\Program Files (x86)\\Notepad++\\notepad++.exe"'],
+
+    // Communication — these are the ones most likely to be missing
+    whatsapp:             [
+      `"${home}\\AppData\\Local\\WhatsApp\\WhatsApp.exe"`,
+      `"${home}\\AppData\\Roaming\\WhatsApp\\WhatsApp.exe"`,
+      `"C:\\Program Files\\WindowsApps\\5319275A.WhatsAppDesktop_*\\WhatsApp.exe"`,
+    ],
+    discord:              [
+      `"${home}\\AppData\\Local\\Discord\\Update.exe" --processStart Discord.exe`,
+      `"${home}\\AppData\\Local\\Discord\\app-*\\Discord.exe"`,
+    ],
+    telegram:             [
+      `"${home}\\AppData\\Roaming\\Telegram Desktop\\Telegram.exe"`,
+      `"${home}\\AppData\\Local\\Telegram Desktop\\Telegram.exe"`,
+      `"C:\\Program Files\\Telegram Desktop\\Telegram.exe"`,
+    ],
+    slack:                [
+      `"${home}\\AppData\\Local\\slack\\slack.exe"`,
+      `"${home}\\AppData\\Roaming\\Microsoft\\Windows\\Start Menu\\Programs\\Slack\\Slack.lnk"`,
+    ],
+    zoom:                 [
+      `"${home}\\AppData\\Roaming\\Zoom\\bin\\Zoom.exe"`,
+      `"C:\\Program Files\\Zoom\\bin\\Zoom.exe"`,
+      `"C:\\Program Files (x86)\\Zoom\\bin\\Zoom.exe"`,
+    ],
+    teams:                [
+      `"${home}\\AppData\\Local\\Microsoft\\Teams\\current\\Teams.exe"`,
+      `"C:\\Program Files\\Microsoft\\Teams\\current\\Teams.exe"`,
+      'start ms-teams:',
+    ],
+    'microsoft teams':    [
+      `"${home}\\AppData\\Local\\Microsoft\\Teams\\current\\Teams.exe"`,
+      'start ms-teams:',
+    ],
+    skype:                [
+      `"${home}\\AppData\\Roaming\\Microsoft\\Windows\\Start Menu\\Programs\\Skype\\Skype.lnk"`,
+      'start skype:',
+    ],
+
+    // Media
+    spotify:              [
+      `"${home}\\AppData\\Roaming\\Spotify\\Spotify.exe"`,
+      `"${home}\\AppData\\Local\\Microsoft\\WindowsApps\\Spotify.exe"`,
+    ],
+    vlc:                  ['"C:\\Program Files\\VideoLAN\\VLC\\vlc.exe"',
+                           '"C:\\Program Files (x86)\\VideoLAN\\VLC\\vlc.exe"'],
+    'media player':       ['start wmplayer'],
+    'windows media player': ['start wmplayer'],
+
+    // Gaming / Launchers
+    steam:                [
+      `"${home}\\AppData\\Local\\Steam\\steam.exe"`,
+      '"C:\\Program Files (x86)\\Steam\\steam.exe"',
+      '"C:\\Program Files\\Steam\\steam.exe"',
+    ],
+    epic:                 [
+      `"${home}\\AppData\\Local\\EpicGamesLauncher\\Portal\\Binaries\\Win64\\EpicGamesLauncher.exe"`,
+    ],
+    'epic games':         [
+      `"${home}\\AppData\\Local\\EpicGamesLauncher\\Portal\\Binaries\\Win64\\EpicGamesLauncher.exe"`,
+    ],
+    xbox:                 ['start xbox:'],
+    'xbox app':           ['start xbox:'],
+
+    // Office
+    word:                 ['"C:\\Program Files\\Microsoft Office\\root\\Office16\\WINWORD.EXE"',
+                           '"C:\\Program Files (x86)\\Microsoft Office\\root\\Office16\\WINWORD.EXE"'],
+    excel:                ['"C:\\Program Files\\Microsoft Office\\root\\Office16\\EXCEL.EXE"',
+                           '"C:\\Program Files (x86)\\Microsoft Office\\root\\Office16\\EXCEL.EXE"'],
+    powerpoint:           ['"C:\\Program Files\\Microsoft Office\\root\\Office16\\POWERPNT.EXE"'],
+    outlook:              ['"C:\\Program Files\\Microsoft Office\\root\\Office16\\OUTLOOK.EXE"'],
+    onenote:              ['start onenote:'],
+
+    // System
+    'file explorer':      ['explorer'],
+    explorer:             ['explorer'],
+    'task manager':       ['taskmgr'],
+    settings:             ['start ms-settings:'],
+    'control panel':      ['control'],
+    'device manager':     ['devmgmt.msc'],
+    regedit:              ['regedit'],
+  };
+
+  // Find matching keys (substring match both ways)
+  const matchedCmds: string[] = [];
+  for (const [key, cmds] of Object.entries(WIN_KNOWN)) {
+    if (lo.includes(key) || key.includes(lo) || lo.replace(/\s+/g, '') === key.replace(/\s+/g, '')) {
+      matchedCmds.push(...cmds);
+    }
+  }
+
+  // ── 2. Try known paths first ───────────────────────────────────────────────
+  for (const cmd of matchedCmds) {
+    try {
+      // Handle glob paths (e.g. app-* directories for Discord)
+      if (cmd.includes('*')) {
+        const resolved = await resolveGlobPath(cmd);
+        if (resolved) {
+          await execAsync(`start "" ${resolved}`, { timeout: 8000 });
+          await sleep(800);
+          return { success: true, message: `Opened ${appName} via resolved path` };
+        }
+        continue;
+      }
+      // Handle 'start xxx:' protocol URLs
+      if (cmd.startsWith('start ') && cmd.includes(':') && !cmd.includes('.exe') && !cmd.includes('.lnk')) {
+        await execAsync(cmd, { timeout: 8000 });
+        await sleep(800);
+        return { success: true, message: `Opened ${appName} via protocol handler` };
+      }
+      // Handle .lnk shortcut files
+      if (cmd.endsWith('.lnk"')) {
+        const lnkPath = cmd.replace(/^"/, '').replace(/"$/, '');
+        try {
+          await fs.access(lnkPath);
+          await execAsync(`start "" "${lnkPath}"`, { timeout: 8000 });
+          await sleep(800);
+          return { success: true, message: `Opened ${appName} via shortcut` };
+        } catch { continue; }
+      }
+      // Regular exe path — check it exists before trying
+      const exeMatch = cmd.match(/"([^"]+\.exe)"/i);
+      if (exeMatch) {
+        try {
+          await fs.access(exeMatch[1]);
+        } catch { continue; } // path doesn't exist, skip
+      }
+      await execAsync(cmd.startsWith('start') ? cmd : `start "" ${cmd}`, { timeout: 8000 });
+      await sleep(800);
+      return { success: true, message: `Opened ${appName}` };
+    } catch { /* try next */ }
+  }
+
+  // ── 3. PowerShell Start-Process (searches PATH + registry) ────────────────
+  const psNames = buildPsNameVariants(appName);
+  for (const name of psNames) {
+    try {
+      await execAsync(
+        `powershell -Command "Start-Process '${name}' -ErrorAction Stop"`,
+        { timeout: 8000 }
+      );
+      await sleep(800);
+      return { success: true, message: `Opened ${appName} via PowerShell` };
+    } catch { /* try next */ }
+  }
+
+  // ── 4. Windows Store / UWP apps via shell:AppsFolder ─────────────────────
+  try {
+    const appId = await findUwpAppId(lo);
+    if (appId) {
+      await execAsync(`explorer shell:AppsFolder\\${appId}`, { timeout: 8000 });
+      await sleep(1200);
+      return { success: true, message: `Opened ${appName} via UWP (${appId})` };
+    }
+  } catch { /* fall through */ }
+
+  // ── 5. Start Menu shortcut search ─────────────────────────────────────────
+  try {
+    const lnk = await findStartMenuShortcut(lo);
+    if (lnk) {
+      await execAsync(`start "" "${lnk}"`, { timeout: 8000 });
+      await sleep(800);
+      return { success: true, message: `Opened ${appName} via Start Menu shortcut` };
+    }
+  } catch { /* fall through */ }
+
+  // ── 6. where.exe / which fallback ─────────────────────────────────────────
+  for (const name of psNames) {
+    try {
+      const { stdout } = await execAsync(`where "${name}" 2>nul`, { timeout: 5000 });
+      const exePath = stdout.trim().split('\n')[0].trim();
+      if (exePath) {
+        await execAsync(`start "" "${exePath}"`, { timeout: 8000 });
+        await sleep(800);
+        return { success: true, message: `Opened ${appName} via where.exe` };
+      }
+    } catch { /* try next */ }
+  }
+
+  throw new Error(
+    `Could not open "${appName}". Make sure it is installed. ` +
+    `Tried: known paths, PowerShell, UWP shell, Start Menu shortcuts, PATH lookup.`
+  );
+}
+
+// ── Helpers for Windows app search ───────────────────────────────────────────
+
+function buildPsNameVariants(appName: string): string[] {
+  const variants = new Set<string>();
+  variants.add(appName);
+  variants.add(appName.replace(/\s+/g, ''));         // "WhatsApp"
+  variants.add(appName.toLowerCase());
+  variants.add(appName.toLowerCase().replace(/\s+/g, ''));
+  variants.add(appName.replace(/\s+/g, '-'));        // "some-app"
+  return Array.from(variants);
+}
+
+async function resolveGlobPath(cmd: string): Promise<string | null> {
+  // Extract the directory with the glob and try to expand it
+  const match = cmd.match(/"([^"]*\*[^"]*)"/);
+  if (!match) return null;
+  const globPath = match[1];
+  const dir = path.dirname(globPath);
+  const pattern = path.basename(globPath);
+
+  try {
+    const entries = await fs.readdir(dir);
+    const regex = new RegExp('^' + pattern.replace(/\*/g, '.*') + '$', 'i');
+    const found = entries.filter(e => regex.test(e)).sort().reverse(); // newest first
+    if (found.length > 0) {
+      const fullPath = path.join(dir, found[0]);
+      // If the glob was for a directory, return the inner exe
+      const stat = await fs.stat(fullPath);
+      if (stat.isDirectory()) {
+        const innerExe = cmd.replace(match[0], `"${fullPath}"`);
+        return innerExe;
+      }
+      return `"${fullPath}"`;
+    }
+  } catch { /* fall through */ }
+  return null;
+}
+
+async function findUwpAppId(appNameLower: string): Promise<string | null> {
+  // Known UWP package family names
+  const UWP_KNOWN: Record<string, string> = {
+    whatsapp:     '5319275A.WhatsAppDesktop_cv1g1gvanyjgm!WhatsApp',
+    calculator:   'Microsoft.WindowsCalculator_8wekyb3d8bbwe!App',
+    'ms paint':   'Microsoft.MSPaint_8wekyb3d8bbwe!Microsoft.MSPaint',
+    paint:        'Microsoft.MSPaint_8wekyb3d8bbwe!Microsoft.MSPaint',
+    photos:       'Microsoft.Windows.Photos_8wekyb3d8bbwe!App',
+    notepad:      'Microsoft.WindowsNotepad_8wekyb3d8bbwe!Notepad',
+    store:        'Microsoft.WindowsStore_8wekyb3d8bbwe!App',
+    'windows store': 'Microsoft.WindowsStore_8wekyb3d8bbwe!App',
+    spotify:      'SpotifyAB.SpotifyMusic_zpdnekdrzrea0!Spotify',
+    netflix:      '4DF9E0F8.Netflix_mcm4njqhnhss8!Netflix.App',
+    'xbox game bar': 'Microsoft.XboxGamingOverlay_8wekyb3d8bbwe!App',
+    'mail':       'microsoft.windowscommunicationsapps_8wekyb3d8bbwe!microsoft.windowslive.mail',
+    'calendar':   'microsoft.windowscommunicationsapps_8wekyb3d8bbwe!microsoft.windowslive.calendar',
+    'maps':       'Microsoft.WindowsMaps_8wekyb3d8bbwe!App',
+    'weather':    'Microsoft.BingWeather_8wekyb3d8bbwe!App',
+    'news':       'Microsoft.BingNews_8wekyb3d8bbwe!AppexNews',
+  };
+
+  for (const [key, id] of Object.entries(UWP_KNOWN)) {
+    if (appNameLower.includes(key) || key.includes(appNameLower)) {
+      return id;
+    }
+  }
+
+  // Try dynamic lookup via PowerShell
+  try {
+    const query = appNameLower.replace(/\s+/g, '*');
+    const { stdout } = await execAsync(
+      `powershell -Command "Get-AppxPackage -Name '*${query}*' | Select-Object -First 1 -ExpandProperty PackageFamilyName"`,
+      { timeout: 10000 }
+    );
+    const pkgFamily = stdout.trim();
+    if (pkgFamily && !pkgFamily.includes('WARNING') && !pkgFamily.includes('ERROR')) {
+      // Try to get the app ID
+      const { stdout: appIds } = await execAsync(
+        `powershell -Command "(Get-AppxPackage -Name '*${query}*' | Select-Object -First 1 | Get-AppxPackageManifest).Package.Applications.Application.Id"`,
+        { timeout: 10000 }
+      );
+      const appId = appIds.trim().split('\n')[0].trim();
+      if (appId) {
+        return `${pkgFamily}!${appId}`;
+      }
+      return `${pkgFamily}!App`;
+    }
+  } catch { /* fall through */ }
+
+  return null;
+}
+
+async function findStartMenuShortcut(appNameLower: string): Promise<string | null> {
+  const home = os.homedir();
+  const username = os.userInfo().username;
+  const startMenuDirs = [
+    `${home}\\AppData\\Roaming\\Microsoft\\Windows\\Start Menu\\Programs`,
+    `C:\\ProgramData\\Microsoft\\Windows\\Start Menu\\Programs`,
+    `C:\\Users\\${username}\\AppData\\Roaming\\Microsoft\\Windows\\Start Menu\\Programs`,
+  ];
+
+  for (const dir of startMenuDirs) {
+    try {
+      const lnk = await searchDirForShortcut(dir, appNameLower);
+      if (lnk) return lnk;
+    } catch { /* dir might not exist */ }
+  }
+  return null;
+}
+
+async function searchDirForShortcut(dir: string, query: string, depth = 0): Promise<string | null> {
+  if (depth > 3) return null;
+  try {
+    const entries = await fs.readdir(dir, { withFileTypes: true });
+    for (const entry of entries) {
+      const entryLower = entry.name.toLowerCase();
+      if (entry.isFile() && entry.name.endsWith('.lnk')) {
+        const nameLower = entryLower.replace('.lnk', '');
+        if (nameLower.includes(query) || query.includes(nameLower) ||
+            nameLower.replace(/\s+/g, '').includes(query.replace(/\s+/g, ''))) {
+          return path.join(dir, entry.name);
+        }
+      } else if (entry.isDirectory() && depth < 2) {
+        const found = await searchDirForShortcut(path.join(dir, entry.name), query, depth + 1);
+        if (found) return found;
+      }
+    }
+  } catch { /* dir not accessible */ }
+  return null;
+}
+
+// ── macOS launcher ────────────────────────────────────────────────────────────
+
+async function openApplicationMac(appName: string, lo: string): Promise<StepResult> {
+  const MAC_KNOWN: Record<string, string> = {
+    chrome:               'Google Chrome',
+    vscode:               'Visual Studio Code',
+    'visual studio code': 'Visual Studio Code',
+    spotify:              'Spotify',
+    discord:              'Discord',
+    terminal:             'Terminal',
+    iterm:                'iTerm',
+    iterm2:               'iTerm',
+    safari:               'Safari',
+    finder:               'Finder',
+    whatsapp:             'WhatsApp',
+    telegram:             'Telegram',
+    slack:                'Slack',
+    zoom:                 'zoom.us',
+    teams:                'Microsoft Teams',
+    'microsoft teams':    'Microsoft Teams',
+    mail:                 'Mail',
+    calendar:             'Calendar',
+    notes:                'Notes',
+    xcode:                'Xcode',
+    preview:              'Preview',
+    pages:                'Pages',
+    numbers:              'Numbers',
+    keynote:              'Keynote',
+    word:                 'Microsoft Word',
+    excel:                'Microsoft Excel',
+    powerpoint:           'Microsoft PowerPoint',
+  };
+
+  const macName = MAC_KNOWN[lo] ?? appName;
+  for (const name of [macName, appName]) {
+    try {
+      await execAsync(`open -a "${name}"`, { timeout: 8000 });
+      return { success: true, message: `Opened ${appName}` };
+    } catch { /* try next */ }
+  }
+
+  // Try Spotlight / mdfind as last resort
+  try {
+    const { stdout } = await execAsync(
+      `mdfind 'kMDItemKind == "Application" && kMDItemDisplayName == "${appName}*"' | head -1`,
+      { timeout: 8000 }
+    );
+    const appPath = stdout.trim();
+    if (appPath) {
+      await execAsync(`open "${appPath}"`, { timeout: 8000 });
+      return { success: true, message: `Opened ${appName} via Spotlight` };
+    }
+  } catch { /* fall through */ }
+
+  throw new Error(`Could not open "${appName}" on macOS`);
+}
+
+// ── Linux launcher ────────────────────────────────────────────────────────────
+
+async function openApplicationLinux(appName: string, lo: string): Promise<StepResult> {
+  const LINUX_KNOWN: Record<string, string[]> = {
+    chrome:     ['google-chrome', 'google-chrome-stable', 'chromium', 'chromium-browser'],
+    firefox:    ['firefox'],
+    vscode:     ['code'],
+    discord:    ['discord'],
+    telegram:   ['telegram-desktop', 'Telegram'],
+    spotify:    ['spotify'],
+    slack:      ['slack'],
+    zoom:       ['zoom'],
+    whatsapp:   ['whatsapp-desktop', 'whatsapp'],
+    terminal:   ['gnome-terminal', 'konsole', 'xterm', 'xfce4-terminal'],
+    files:      ['nautilus', 'dolphin', 'thunar'],
+    calculator: ['gnome-calculator', 'kcalc'],
+  };
+
+  const candidates: string[] = [];
+  for (const [key, cmds] of Object.entries(LINUX_KNOWN)) {
+    if (lo.includes(key) || key.includes(lo)) candidates.push(...cmds);
+  }
+  candidates.push(lo.replace(/\s+/g, '-'), lo.replace(/\s+/g, ''), lo);
+
+  for (const cmd of candidates) {
+    try {
+      execAsync(`${cmd} &`);
+      await sleep(500);
+      return { success: true, message: `Launched ${appName}` };
+    } catch { /* try next */ }
+  }
+
+  try {
+    await execAsync(`xdg-open "${appName}" &`);
+    return { success: true, message: `Opened ${appName}` };
+  } catch {
+    throw new Error(`Could not open "${appName}" on Linux`);
+  }
+}
+
+// ─── Non-Browser Capabilities ─────────────────────────────────────────────────
 
 async function setWallpaper(query: string | undefined): Promise<StepResult> {
   if (!query) throw new Error('query is required');
