@@ -7,6 +7,7 @@ import * as https from 'https';
 import * as http from 'http';
 import { promisify } from 'util';
 import { PlanStep, StepResult } from '../types';
+import { appFindWindow, appClick, appType, appFocusWindow } from './desktopEngine';
 import { openApplicationWindows } from './windowsAppLauncher';
 import { smartFindAndAct } from './Browserengine';
 
@@ -84,6 +85,10 @@ export async function executeStep(step: PlanStep): Promise<StepResult> {
     case 'create_folder':     return createFolder(parameters.path);
     case 'wait':              return wait(parameters.seconds ?? 1);
     case 'download_file':     return downloadFileCapability(parameters.url, parameters.destination ?? parameters.path);
+     case 'app_find_window':  return appFindWindowStep(parameters.app_name, parameters.seconds);
+    case 'app_focus_window': return appFocusWindowStep(parameters.app_name);
+    case 'app_click':        return appClickStep(parameters.app_name, parameters.element_name);
+    case 'app_type':         return appTypeStep(parameters.app_name, parameters.element_name, parameters.text);
     default: throw new Error(`Unknown capability: ${capability}`);
   }
 }
@@ -128,6 +133,29 @@ async function browserClick(selector: string | undefined): Promise<StepResult> {
     message: `Clicked via ${result.strategy} (tier ${result.tier})`,
     ...(result.warning ? { warning: result.warning } : {}),
   };
+}
+
+async function appFindWindowStep(appName: string | undefined, seconds: number | undefined): Promise<StepResult> {
+  if (!appName) throw new Error('app_name is required');
+  return appFindWindow(appName, seconds ?? 10);
+}
+
+async function appFocusWindowStep(appName: string | undefined): Promise<StepResult> {
+  if (!appName) throw new Error('app_name is required');
+  return appFocusWindow(appName);
+}
+
+async function appClickStep(appName: string | undefined, elementName: string | undefined): Promise<StepResult> {
+  if (!appName)     throw new Error('app_name is required');
+  if (!elementName) throw new Error('element_name is required');
+  return appClick(appName, elementName);
+}
+
+async function appTypeStep(appName: string | undefined, elementName: string | undefined, text: string | undefined): Promise<StepResult> {
+  if (!appName)     throw new Error('app_name is required');
+  if (!elementName) throw new Error('element_name is required');
+  if (!text)        throw new Error('text is required');
+  return appType(appName, elementName, text);
 }
 
 // ─── App Launcher ─────────────────────────────────────────────────────────────
