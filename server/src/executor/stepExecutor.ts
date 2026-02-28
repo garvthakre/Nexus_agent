@@ -7,7 +7,7 @@ import * as https from 'https';
 import * as http from 'http';
 import { promisify } from 'util';
 import { PlanStep, StepResult } from '../types';
-import { appFindWindow, appClick, appType, appFocusWindow } from './desktopEngine';
+import { appFindWindow, appClick, appType, appFocusWindow, appScreenshot, appVerify } from './desktopEngine';
 import { openApplicationWindows } from './windowsAppLauncher';
 import { smartFindAndAct } from './Browserengine';
 
@@ -89,6 +89,8 @@ export async function executeStep(step: PlanStep): Promise<StepResult> {
     case 'app_focus_window': return appFocusWindowStep(parameters.app_name);
     case 'app_click':        return appClickStep(parameters.app_name, parameters.element_name);
     case 'app_type':         return appTypeStep(parameters.app_name, parameters.element_name, parameters.text);
+     case 'app_screenshot': return appScreenshotStep(parameters.app_name);
+     case 'app_verify':     return appVerifyStep(parameters.app_name, parameters.text);
     default: throw new Error(`Unknown capability: ${capability}`);
   }
 }
@@ -399,6 +401,19 @@ async function downloadFileCapability(url: string | undefined, destination: stri
 async function wait(seconds: number): Promise<StepResult> {
   await sleep(seconds * 1000);
   return { success: true, message: `Waited ${seconds}s` };
+}
+
+async function appScreenshotStep(appName: string | undefined): Promise<StepResult> {
+  if (!appName) throw new Error('app_name is required');
+  const { appScreenshot } = await import('./desktopEngine');
+  return appScreenshot(appName);
+}
+
+async function appVerifyStep(appName: string | undefined, text: string | undefined): Promise<StepResult> {
+  if (!appName) throw new Error('app_name is required');
+  if (!text)    throw new Error('text is required for app_verify');
+  const { appVerify } = await import('./desktopEngine');
+  return appVerify(appName, text);
 }
 
 // ─── Download Helper ──────────────────────────────────────────────────────────
