@@ -7,7 +7,8 @@ import { v4 as uuidv4 } from 'uuid';
 
 import { planTask } from './ai/planner';
 import { reviewPlan } from './ai/reviewer';
-import { executeStep } from './executor/stepExecutor';
+import { executeStep, getLivePage } from './executor/stepExecutor';
+import { logExecution, getFailureStats } from './utils/executionLogger';
 import {
   Plan,
   Session,
@@ -48,8 +49,26 @@ wss.on('connection', (ws: WebSocket) => {
 
 // ─── REST Routes ──────────────────────────────────────────────────────────────
 
-app.get('/api/health', (_req: Request, res: Response) => {
-  res.json({ status: 'online', timestamp: new Date().toISOString(), provider: process.env.AI_PROVIDER ?? 'groq' });
+// Upgraded /api/health — now includes execution stats
+app.get('/api/health', async (_req: Request, res: Response) => {
+  const stats = await getFailureStats();
+  res.json({
+    status:       'online',
+    timestamp:    new Date().toISOString(),
+    provider:     process.env.AI_PROVIDER ?? 'groq',
+    totalRuns:    stats.totalRuns,
+    avgSuccessRate: `${Math.round(stats.avgSuccess * 100)}%`,
+    recentTrend:  stats.recentTrend,
+    topFailures:  Object.entries(stats.byCapability)
+      .sort((a, b) => b[1] - a[1]).slice(0, 3)
+      .map(([cap, n]) => `${cap}(${n})`).join(', ') || 'none',
+  });
+});
+
+// NEW: /api/logs — full failure stats for debugging
+app.get('/api/logs', async (_req: Request, res: Response) => {
+  const stats = await getFailureStats();
+  res.json(stats);
 });
 
 app.post('/api/plan', async (req: Request<object, object, PlanRequest>, res: Response) => {
@@ -117,11 +136,14 @@ app.get('/api/session/:sessionId', (req: Request, res: Response) => {
 // ─── Adaptive Execution Logic ─────────────────────────────────────────────────
 
 const MAX_RETRIES = 2;
+const executionStartTimes = new Map<string, number>();
 
 async function executeAllSteps(sessionId: string, session: Session): Promise<void> {
   const { plan } = session;
   const results: StepExecutionResult[] = [];
   let totalFailed = 0;
+  const startTime   = Date.now();
+  executionStartTimes.set(sessionId, startTime);
 
   for (let i = 0; i < plan.steps.length; i++) {
     if (session.stopped) break;
@@ -138,31 +160,38 @@ async function executeAllSteps(sessionId: string, session: Session): Promise<voi
 
     let lastError = '';
     let succeeded = false;
+    let retryCount = 0;
 
     // ── Retry loop ──────────────────────────────────────────────────────────
     for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
       if (session.stopped) break;
 
       if (attempt > 0) {
+        retryCount++;
         broadcast({
           type: 'safety_check',
           sessionId,
           stepNumber: step.step_number,
           message: `Retrying step ${step.step_number} (attempt ${attempt + 1}/${MAX_RETRIES + 1})...`,
         });
-        await sleep(1500 * attempt); // back-off
+        await sleep(1500 * attempt);
       }
 
-      const startTime = Date.now();
+      const stepStartTime = Date.now();
 
       try {
-        const result = await executeStep(step);
-        const duration = Date.now() - startTime;
+        const result   = await executeStep(step);
+        const duration = Date.now() - stepStartTime;
 
-        results.push({ stepNumber: step.step_number, success: true, result, duration });
+        results.push({
+          stepNumber: step.step_number,
+          success:    true,
+          result,
+          duration,
+        });
         broadcast({ type: 'step_complete', sessionId, stepNumber: step.step_number, result, duration });
         succeeded = true;
-        break; // no more retries needed
+        break;
       } catch (err: unknown) {
         lastError = (err as Error).message;
         console.warn(`[Executor] Step ${step.step_number} attempt ${attempt + 1} failed:`, lastError);
@@ -170,9 +199,6 @@ async function executeAllSteps(sessionId: string, session: Session): Promise<voi
     }
 
     if (!succeeded) {
-      // ── Adaptive fallback: skip non-critical steps, adapt plan ────────────
-      const isCritical = step.safety_risk === 'high' || i === 0;
-
       broadcast({
         type: 'step_error',
         sessionId,
@@ -183,23 +209,28 @@ async function executeAllSteps(sessionId: string, session: Session): Promise<voi
       results.push({ stepNumber: step.step_number, success: false, error: lastError });
       totalFailed++;
 
+      // ── Adaptive fallback ─────────────────────────────────────────────────
+      const isCritical = step.safety_risk === 'high' || i === 0;
+
       if (isCritical && totalFailed === 1) {
-        // Try an adaptive workaround for the most common failure types
         const workaround = await tryAdaptiveWorkaround(step, lastError, sessionId);
         if (workaround) {
-          results[results.length - 1] = { stepNumber: step.step_number, success: true, result: workaround };
+          results[results.length - 1] = {
+            stepNumber: step.step_number,
+            success:    true,
+            result:     workaround,
+          };
           broadcast({ type: 'step_complete', sessionId, stepNumber: step.step_number, result: workaround, duration: 0 });
           totalFailed--;
           continue;
         }
       }
 
-      // Skip the step and continue — don't halt entire execution
       broadcast({
         type: 'safety_check',
         sessionId,
         stepNumber: step.step_number,
-        message: `⚠ Step ${step.step_number} skipped after ${MAX_RETRIES + 1} attempts — continuing with next step...`,
+        message: `⚠ Step ${step.step_number} skipped after ${MAX_RETRIES + 1} attempts — continuing...`,
       });
 
       await sleep(500);
@@ -210,6 +241,7 @@ async function executeAllSteps(sessionId: string, session: Session): Promise<voi
 
   if (!session.stopped) {
     const successCount = results.filter((r) => r.success).length;
+    const totalDuration = Date.now() - startTime;
     session.status = totalFailed === results.length ? 'failed' : 'completed';
 
     broadcast({
@@ -217,13 +249,41 @@ async function executeAllSteps(sessionId: string, session: Session): Promise<voi
       sessionId,
       results,
       summary: {
-        total: plan.steps.length,
-        success: successCount,
-        failed: totalFailed,
-        duration: results.reduce((sum, r) => sum + (r.duration ?? 0), 0),
+        total:    plan.steps.length,
+        success:  successCount,
+        failed:   totalFailed,
+        duration: totalDuration,
       },
     });
+
+    // ── Log the execution for analytics / self-improvement ────────────────
+    await logExecution({
+      timestamp:      new Date().toISOString(),
+      sessionId,
+      prompt:         session.plan.summary,
+      intent:         session.plan.intent,
+      provider:       process.env.AI_PROVIDER ?? 'groq',
+      totalSteps:     plan.steps.length,
+      steps:          results.map((r, idx) => ({
+        stepNumber:   r.stepNumber,
+        capability:   plan.steps[idx]?.capability ?? 'unknown',
+        description:  plan.steps[idx]?.description ?? '',
+        success:      r.success,
+        errorMessage: r.error,
+        durationMs:   r.duration ?? 0,
+        retryCount:   0,
+        pageUrl:      r.result?.url as string | undefined,
+        strategy:     r.result?.strategy as string | undefined,
+      })),
+      overallSuccess: totalFailed < results.length / 2,
+      successRate:    results.length > 0
+        ? (results.length - totalFailed) / results.length
+        : 0,
+      durationMs:     totalDuration,
+    });
   }
+
+  executionStartTimes.delete(sessionId);
 }
 
 // ─── Adaptive Workarounds ─────────────────────────────────────────────────────
@@ -238,32 +298,27 @@ async function tryAdaptiveWorkaround(
     message: `Trying adaptive workaround for step ${step.step_number}...`,
   });
 
-  // Playwright missing → auto-install
   if (error.includes("Executable doesn't exist") || error.includes('playwright install')) {
     broadcast({ type: 'planning', message: 'Auto-installing Playwright browsers...' });
     try {
       const { execAsync: exec2 } = await getExecAsync();
       await exec2('npx playwright install chromium', { timeout: 120_000 });
       broadcast({ type: 'planning', message: '✓ Playwright installed — retrying step...' });
-      // Re-execute the original step
       return await executeStep(step);
     } catch (installErr) {
       console.error('[Workaround] Playwright install failed:', installErr);
-      // Fallback: open URL in system browser
       if (step.capability === 'browser_open' && step.parameters.url) {
         return openInSystemBrowser(step.parameters.url);
       }
     }
   }
 
-  // robotjs / typing failure → PowerShell fallback
   if (error.includes('robotjs') || error.includes('Cannot type')) {
     if (step.parameters.text) {
       return openTextInNotepad(step.parameters.text, sessionId);
     }
   }
 
-  // App open failure → try shell open
   if (step.capability === 'open_application' && step.parameters.app_name) {
     return openViaShell(step.parameters.app_name);
   }
@@ -287,15 +342,15 @@ async function openInSystemBrowser(url: string): Promise<import('./types').StepR
 
 async function openTextInNotepad(text: string, _sessionId: string): Promise<import('./types').StepResult> {
   const { execAsync: exec2 } = await getExecAsync();
-  const fs2 = await import('fs/promises');
-  const os2 = await import('os');
+  const fs2   = await import('fs/promises');
+  const os2   = await import('os');
   const path2 = await import('path');
   const tmpFile = path2.join(os2.tmpdir(), `nexus-text-${Date.now()}.txt`);
   await fs2.writeFile(tmpFile, text, 'utf-8');
   if (process.platform === 'win32') {
     await exec2(`notepad "${tmpFile}"`);
   }
-  return { success: true, path: tmpFile, message: `Text written to ${tmpFile} and opened in Notepad` };
+  return { success: true, path: tmpFile, message: `Text written to ${tmpFile}` };
 }
 
 async function openViaShell(appName: string): Promise<import('./types').StepResult> {
@@ -313,7 +368,7 @@ async function openViaShell(appName: string): Promise<import('./types').StepResu
 }
 
 async function getExecAsync() {
-  const { exec } = await import('child_process');
+  const { exec }    = await import('child_process');
   const { promisify } = await import('util');
   return { execAsync: promisify(exec) };
 }
