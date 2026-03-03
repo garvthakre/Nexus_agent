@@ -1,0 +1,79 @@
+[
+  {
+    "category": "browser_search",
+    "request": "search for the latest AI news and open top 3 articles and create a Word document",
+    "keywords": ["search", "news", "articles", "document", "report", "summarize", "research"],
+    "steps": [
+      { "capability": "browser_open", "parameters": { "url": "https://www.bing.com/news/search?q=latest+AI+news" }, "safety_risk": "low" },
+      { "capability": "browser_click", "parameters": { "selector": "li.b_algo:nth-of-type(1) h2 a" }, "safety_risk": "low" },
+      { "capability": "browser_read_page", "parameters": { "variable_name": "article1", "topic": "AI news" }, "safety_risk": "low" },
+      { "capability": "browser_open", "parameters": { "url": "https://www.bing.com/news/search?q=latest+AI+news" }, "safety_risk": "low" },
+      { "capability": "browser_click", "parameters": { "selector": "li.b_algo:nth-of-type(2) h2 a" }, "safety_risk": "low" },
+      { "capability": "browser_read_page", "parameters": { "variable_name": "article2", "topic": "AI news" }, "safety_risk": "low" },
+      { "capability": "browser_open", "parameters": { "url": "https://www.bing.com/news/search?q=latest+AI+news" }, "safety_risk": "low" },
+      { "capability": "browser_click", "parameters": { "selector": "li.b_algo:nth-of-type(3) h2 a" }, "safety_risk": "low" },
+      { "capability": "browser_read_page", "parameters": { "variable_name": "article3", "topic": "AI news" }, "safety_risk": "low" },
+      { "capability": "create_file", "parameters": { "path": "Desktop/Summary.txt", "content": "Summary\n\nARTICLE 1\n{{article1}}\n\nARTICLE 2\n{{article2}}\n\nARTICLE 3\n{{article3}}" }, "safety_risk": "low" },
+      { "capability": "run_shell_command", "parameters": { "command": "notepad ~/Desktop/Summary.txt" }, "safety_risk": "low" }
+    ]
+  },
+  {
+    "category": "browser_youtube",
+    "request": "search YouTube for lofi hip hop and play the first video",
+    "keywords": ["youtube", "video", "play", "watch", "music", "search"],
+    "steps": [
+      { "capability": "browser_open", "parameters": { "url": "https://www.youtube.com" }, "safety_risk": "low" },
+      { "capability": "browser_fill", "parameters": { "selector": "input[name='search_query']", "value": "lofi hip hop" }, "safety_risk": "low" },
+      { "capability": "browser_click", "parameters": { "selector": "button[aria-label='Search']" }, "safety_risk": "low" },
+      { "capability": "browser_click", "parameters": { "selector": "ytd-video-renderer a#video-title" }, "safety_risk": "low" }
+    ]
+  },
+  {
+    "category": "browser_whatsapp",
+    "request": "open WhatsApp Web search for John and send a message",
+    "keywords": ["whatsapp", "message", "send", "chat", "contact"],
+    "steps": [
+      { "capability": "browser_open", "parameters": { "url": "https://web.whatsapp.com" }, "safety_risk": "low" },
+      { "capability": "wait", "parameters": { "seconds": 4 }, "safety_risk": "low" },
+      { "capability": "browser_fill", "parameters": { "selector": "div[contenteditable][data-tab='3']", "value": "John" }, "safety_risk": "low" },
+      { "capability": "wait", "parameters": { "seconds": 1 }, "safety_risk": "low" },
+      { "capability": "browser_click", "parameters": { "selector": "span[title='John']" }, "safety_risk": "low" },
+      { "capability": "browser_fill", "parameters": { "selector": "div[contenteditable][data-tab='10']", "value": "Hey, I'll be late by 10 minutes!" }, "safety_risk": "low" },
+      { "capability": "browser_click", "parameters": { "selector": "[data-testid='send']" }, "safety_risk": "low" }
+    ]
+  },
+  {
+    "category": "browser_amazon",
+    "request": "find wireless headphones under 2000 rupees on Amazon India",
+    "keywords": ["amazon", "buy", "product", "shop", "price", "rupees", "under"],
+    "steps": [
+      { "capability": "browser_open", "parameters": { "url": "https://www.amazon.in/s?k=wireless+headphones&rh=p_36%3A-200000&s=review-rank" }, "safety_risk": "low" },
+      { "capability": "browser_extract_results", "parameters": { "variable_name": "products", "count": 5 }, "safety_risk": "low" },
+      { "capability": "browser_open", "parameters": { "url": "{{products_0_url}}" }, "safety_risk": "low" }
+    ]
+  },
+  {
+    "category": "browser_spotify",
+    "request": "open Spotify and search for jazz music",
+    "keywords": ["spotify", "music", "song", "playlist", "artist", "album"],
+    "steps": [
+      { "capability": "browser_open", "parameters": { "url": "https://open.spotify.com/search" }, "safety_risk": "low" },
+      { "capability": "wait", "parameters": { "seconds": 2 }, "safety_risk": "low" },
+      { "capability": "browser_fill", "parameters": { "selector": "input[data-testid='search-input']", "value": "jazz music" }, "safety_risk": "low" }
+    ]
+  },
+  {
+    "category": "browser_linkedin_jobs",
+    "request": "search LinkedIn for Python developer jobs in Bangalore and save results",
+    "keywords": ["linkedin", "jobs", "career", "hiring", "work", "position", "developer"],
+    "steps": [
+      { "capability": "browser_open", "parameters": { "url": "https://www.linkedin.com/jobs/search?keywords=Python+Developer&location=Bangalore" }, "safety_risk": "low" },
+      { "capability": "wait", "parameters": { "seconds": 3 }, "safety_risk": "low" },
+      { "capability": "browser_extract_results", "parameters": { "variable_name": "jobs", "count": 5 }, "safety_risk": "low" },
+      { "capability": "browser_open", "parameters": { "url": "{{jobs_0_url}}" }, "safety_risk": "low" },
+      { "capability": "browser_read_page", "parameters": { "variable_name": "job1", "topic": "job listing" }, "safety_risk": "low" },
+      { "capability": "create_file", "parameters": { "path": "Desktop/Jobs.txt", "content": "JOB 1\n{{job1}}" }, "safety_risk": "low" },
+      { "capability": "run_shell_command", "parameters": { "command": "notepad ~/Desktop/Jobs.txt" }, "safety_risk": "low" }
+    ]
+  }
+]
