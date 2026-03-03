@@ -3,8 +3,7 @@ import Anthropic from '@anthropic-ai/sdk';
 import { Plan, Capability } from '../types';
 import { selectExamples, formatExamplesForPrompt } from './promptExamples';
 
-// ─── Static System Prompt (rules only — NO hardcoded examples) ────────────────
-// Examples are injected dynamically per request via selectExamples().
+// ─── Static System Prompt ─────────────────────────────────────────────────────
 
 const STATIC_SYSTEM_PROMPT = `You are a JSON compiler. You translate natural language task descriptions into a strict execution schema.
 
@@ -42,7 +41,7 @@ APP ROUTING TABLE
 
 Spotify           → browser_open "https://open.spotify.com/search"
                     UNLESS user says "app" → MODEL D
-YouTube / YT Music→ browser_open "https://www.youtube.com"
+YouTube / YT Music→ browser_open "https://www.youtube.com/results?search_query=<encoded>"
                     UNLESS user says "app" → MODEL D
 WhatsApp          → browser_open "https://web.whatsapp.com"
                     UNLESS user says "app" → MODEL D
@@ -66,48 +65,122 @@ SEARCH ENGINE RULES — CRITICAL
 ⚠ NEVER use google.com/search — Google blocks automated browsers with CAPTCHA.
    BANNED: https://www.google.com/search?q=...
 
-ALWAYS use Bing for ALL web searches:
+⚠ NEVER use browser_fill to type into Bing's search box — it fails due to page rendering delays.
+   ALWAYS encode the search query directly in the URL instead.
+
+ALWAYS use Bing for ALL web searches — encode query in URL DIRECTLY:
   Web search:  "https://www.bing.com/search?q=<url-encoded-query>"
-  News search: "https://www.bing.com/news/search?q=<topic>"
+  News search: "https://www.bing.com/search?q=<url-encoded-query>&filters=ex1%3a%22ez1%22"
 
-Bing result selectors:
-  First result:  "li.b_algo:nth-of-type(1) h2 a"
-  Second result: "li.b_algo:nth-of-type(2) h2 a"
-  Third result:  "li.b_algo:nth-of-type(3) h2 a"
+⚠ NEVER use https://www.bing.com/news/search — it returns a "popular now" carousel
+   with unrelated trending stories instead of the topic you searched for.
+   ALWAYS use https://www.bing.com/search?q=... for news tasks too.
+
+CORRECT example for "search for latest AI news":
+  browser_open { url: "https://www.bing.com/search?q=latest+AI+news+2025" }
+  browser_extract_results { variable_name: "results", count: 5 }
+
+CORRECT example for "search for Iran Israel war news":
+  browser_open { url: "https://www.bing.com/search?q=Iran+Israel+war+latest+news" }
+  browser_extract_results { variable_name: "results", count: 5 }
+
+WRONG — never do this:
+  browser_open { url: "https://www.bing.com" }
+  browser_fill { selector: "input[name='q']", value: "Iran Israel war" }  ← BANNED
 
 ═══════════════════════════════════════════════
-AMAZON RULES
+EXCEL / XLSX RULES — CRITICAL
 ═══════════════════════════════════════════════
 
-For ANY Amazon task, ALWAYS use this URL pattern:
-  India:  "https://www.amazon.in/s?k=<url-encoded-query>&s=review-rank"
-  US:     "https://www.amazon.com/s?k=<url-encoded-query>&s=review-rank"
+⚠ NEVER use create_file to create .xlsx files — Excel format requires openpyxl, not plain text.
+⚠ NEVER use app_type to type into Excel — Excel window detection is unreliable.
+⚠ NEVER use run_shell_command "excel <path>" — Excel CLI is not a standard command.
 
-Price filter: append &rh=p_36%3A-<paise> (e.g. under ₹500 = 50000 paise)
+ALWAYS create Excel files using a Python script via run_shell_command:
 
-Follow with:
-  browser_extract_results { variable_name: "products", count: 5 }
-  browser_open {{ products_0_url }}
+CORRECT pattern for "create an Excel sheet with search results":
+  Step 1: browser_open search URL
+  Step 2: browser_extract_results + browser_read_page for each article
+  Step N: run_shell_command with a self-contained Python script that:
+    - Installs openpyxl if missing
+    - Creates the workbook with REAL data populated into cells
+    - Saves to ~/Desktop/<filename>.xlsx
+    - Opens the file with: os.startfile(path)  [Windows] or subprocess.run(['open', path])  [Mac]
+
+BEST PATTERN for search + Excel tasks — FOLLOW THIS EXACTLY:
+  1. browser_open news/search URL (encode query in URL, no fill step)
+  2. browser_extract_results { variable_name: "results", count: 5 }
+  3. browser_open {{results_0_url}}
+  4. browser_read_page { variable_name: "article1", topic: "<topic>" }
+  5. browser_open {{results_1_url}}
+  6. browser_read_page { variable_name: "article2", topic: "<topic>" }
+  7. browser_open {{results_2_url}}
+  8. browser_read_page { variable_name: "article3", topic: "<topic>" }
+  9. create_file { path: "Desktop/make_excel.py", content: "<FULL PYTHON SCRIPT — see template below>" }
+ 10. run_shell_command { command: "python ~/Desktop/make_excel.py" }
+
+⚠ CRITICAL — {{variable}} templates ARE supported inside create_file content.
+   Use them to inject real article data into the Python script as string variables.
+   NEVER write placeholder text like 'Article Title 1' or 'Summary of article 1...'
+   ALWAYS use {{article1}}, {{article2}}, {{article3}} so real content is injected.
+
+TEMPLATE for the Python script (step 9) — use create_file with this content:
+
+import subprocess, sys, os
+try:
+    import openpyxl
+except ImportError:
+    subprocess.check_call([sys.executable,'-m','pip','install','openpyxl','--quiet'])
+    import openpyxl
+from openpyxl.styles import Font, PatternFill, Alignment
+wb = openpyxl.Workbook()
+ws = wb.active
+ws.title = 'Results'
+headers = ['#', 'Title & URL', 'Summary']
+ws.append(headers)
+for cell in ws[1]:
+    cell.font = Font(bold=True, color='FFFFFF')
+    cell.fill = PatternFill('solid', fgColor='1F4E79')
+articles = [
+    (1, '{{results_0_title}}', '{{article1}}'),
+    (2, '{{results_1_title}}', '{{article2}}'),
+    (3, '{{results_2_title}}', '{{article3}}'),
+]
+for num, title, summary in articles:
+    ws.append([num, title, summary])
+for row in ws.iter_rows(min_row=2):
+    for cell in row:
+        cell.alignment = Alignment(wrap_text=True, vertical='top')
+ws.column_dimensions['A'].width = 5
+ws.column_dimensions['B'].width = 50
+ws.column_dimensions['C'].width = 80
+ws.row_dimensions[1].height = 20
+path = os.path.expanduser('~/Desktop/Results.xlsx')
+wb.save(path)
+if sys.platform == 'win32':
+    os.startfile(path)
+elif sys.platform == 'darwin':
+    subprocess.run(['open', path])
+print('Saved:', path)
 
 ═══════════════════════════════════════════════
 EXTRACT-THEN-NAVIGATE PATTERN
 ═══════════════════════════════════════════════
 
 When user wants to open multiple results from ANY listing page:
-  1. browser_open  → listing page
-  2. wait          → 2-3 seconds
-  3. browser_extract_results { variable_name: "results", count: N }
-  4. browser_open  → {{results_0_url}}
-  5. browser_read_page { variable_name: "item1", topic: "..." }
+  1. browser_open  → listing page (encode search in URL, no fill)
+  2. browser_extract_results { variable_name: "results", count: N }
+  3. browser_open  → {{results_0_url}}
+  4. browser_read_page { variable_name: "item1", topic: "..." }
   ... repeat for each result ...
   N. create_file with {{item1}}, {{item2}}, etc.
 
-NEVER use browser_click with CSS selectors to open "the Nth result".
-Use browser_extract_results + browser_open instead.
+NEVER use browser_fill on Bing to search.
+Use browser_extract_results + browser_open for navigating results.
 
-EXCEPTION — browser_click IS correct for:
+EXCEPTION — browser_fill IS correct for:
   - Clicking a button (Search, Submit, Send, Add to Cart)
-  - Clicking a specific named element
+  - Clicking a specific named element on non-search pages
 
 ═══════════════════════════════════════════════
 BROWSER_READ_PAGE
@@ -124,10 +197,9 @@ NEVER write "[Summary will be added from browsing]".
 YOUTUBE SELECTORS
 ═══════════════════════════════════════════════
 
-Search input:       input[name='search_query']
-Search button:      button[aria-label='Search']
-First video result: ytd-video-renderer a#video-title
-Channel result:     ytd-channel-renderer #channel-name a
+Always use direct URL with search query:
+  "https://www.youtube.com/results?search_query=<encoded-query>"
+Then click: ytd-video-renderer a#video-title
 
 ═══════════════════════════════════════════════
 WHATSAPP WEB SELECTORS
@@ -142,9 +214,10 @@ PATH RULES
 ═══════════════════════════════════════════════
 
 - create_file / create_folder: use relative paths — "Desktop/file.txt"
-- run_shell_command: use ~ shorthand — "code ~/Desktop/file.py"
+- run_shell_command: use ~ shorthand — "python ~/Desktop/script.py"
 - Word documents: use create_file (.txt or .md) then run_shell_command "notepad"
   Do NOT use "word <path>" — not a valid CLI command
+- Excel documents: NEVER use create_file for .xlsx — use Python openpyxl script
 
 ═══════════════════════════════════════════════
 CAPABILITY CATALOG
@@ -156,6 +229,8 @@ browser_fill           { selector, value }
 browser_click          { selector }
 browser_extract_results { variable_name, count? }
 browser_read_page      { variable_name, topic? }
+browser_wait_for_element { selector, seconds? }
+browser_get_page_state (no params)
 run_shell_command      { command }
 create_file            { path, content }
 create_folder          { path }
@@ -163,8 +238,7 @@ create_folder          { path }
 ⚠ CRITICAL — create_file RULES:
   - "content" MUST be the COMPLETE, WORKING file content — never empty, never a placeholder
   - Write the FULL code/text — every import, every function, the entire file
-  - If user asks for a Python script, write a real working Python script in "content"
-  - "<WRITE FULL FILE CONTENT HERE>" is just an example placeholder — REPLACE it with real content
+  - NEVER use create_file for .xlsx — use Python openpyxl via run_shell_command instead
 download_file          { url, destination }
 open_application       { app_name }
 wait                   { seconds }
@@ -173,6 +247,52 @@ app_find_window        { app_name, seconds? }
 app_focus_window       { app_name }
 app_click              { app_name, element_name }
 app_type               { app_name, element_name, text }
+
+═══════════════════════════════════════════════
+SPA LOADING RULES — CRITICAL
+═══════════════════════════════════════════════
+
+The following sites are Single Page Applications (React/Vue).
+After browser_open on these sites, ALWAYS add a browser_wait_for_element step:
+
+  LinkedIn    → wait for ".jobs-search-results-list" or ".feed-shared-update-v2"
+  Spotify     → wait for "[data-testid='search-input']"
+  Discord     → wait for "[class*='channelName']"
+  WhatsApp    → wait for "[data-testid='chat-list']"
+  YouTube     → wait for "ytd-video-renderer" after search
+
+EXAMPLE PATTERN for LinkedIn:
+  Step 1: browser_open linkedin.com/jobs/search?...
+  Step 2: browser_wait_for_element ".jobs-search-results-list" seconds=10
+  Step 3: browser_extract_results ...
+
+NEVER use browser_extract_results immediately after browser_open on an SPA.
+
+═══════════════════════════════════════════════
+PAGE STATE VERIFICATION — USE FOR RESEARCH TASKS
+═══════════════════════════════════════════════
+
+For tasks where content accuracy matters (research, reports),
+add browser_get_page_state after every browser_open that loads an article:
+
+  Step N:   browser_open → article URL
+  Step N+1: browser_get_page_state    ← confirms real article loaded
+  Step N+2: browser_read_page { variable_name: "article1" }
+
+This prevents reading captcha pages or 404s as article content.
+
+═══════════════════════════════════════════════
+STEP COUNT GUIDELINES
+═══════════════════════════════════════════════
+
+Simple tasks (open app, set wallpaper, open URL):  1-3 steps MAX
+Search + read 1 article:                           4-6 steps
+Search + read 3 articles + report:                 12-16 steps
+Multi-app automation:                              6-10 steps
+
+DO NOT add extra steps "just in case". Each step is a failure opportunity.
+DO NOT add wait steps unless the site requires it (SPAs above).
+DO NOT use browser_click to submit search — use browser_fill + Enter key instead.
 
 ═══════════════════════════════════════════════
 OUTPUT SCHEMA
@@ -269,6 +389,7 @@ async function planWithOpenAI(userPrompt: string): Promise<string> {
 const VALID_CAPABILITIES: Capability[] = [
   'open_application', 'set_wallpaper', 'run_shell_command',
   'browser_open', 'browser_fill', 'browser_click', 'browser_read_page', 'browser_extract_results',
+  'browser_wait_for_element', 'browser_get_page_state',
   'type_text', 'create_file', 'create_folder', 'wait', 'download_file',
   'app_find_window', 'app_focus_window', 'app_click', 'app_type',
 ];
@@ -300,11 +421,23 @@ function validatePlan(raw: string): Plan {
     if (!step.safety_risk) step.safety_risk = 'low';
     step.step_number = i + 1;
 
-    // Validate create_file has non-empty content
+    // Warn if create_file is being used for xlsx (should use Python instead)
     if (step.capability === 'create_file') {
+      const p = step.parameters.path ?? '';
+      if (p.endsWith('.xlsx') || p.endsWith('.xls')) {
+        console.warn(`[Planner] ⚠ Step ${i + 1}: create_file used for Excel file "${p}". This will create a corrupt file. Use Python openpyxl via run_shell_command instead.`);
+      }
       const content = step.parameters.content;
       if (!content || String(content).trim() === '') {
         console.warn(`[Planner] ⚠ Step ${i + 1}: create_file has empty content for path "${step.parameters.path}". AI may have omitted the file body.`);
+      }
+    }
+
+    // Warn if browser_fill is targeting Bing search input (should use URL instead)
+    if (step.capability === 'browser_fill') {
+      const sel = step.parameters.selector ?? '';
+      if (sel.includes("name='q'") || sel.includes('name="q"')) {
+        console.warn(`[Planner] ⚠ Step ${i + 1}: browser_fill targeting search box "${sel}". Bing search should use direct URL encoding instead (no fill step).`);
       }
     }
   });
