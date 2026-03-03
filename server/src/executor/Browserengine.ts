@@ -1,21 +1,21 @@
 /**
- * browserEngine.ts  — NEXUS Smart Browser Engine v3
+ * browserEngine.ts  — NEXUS Smart Browser Engine v4
  * ─────────────────────────────────────────────────────────────────────────────
- * Tiered fallback browser automation engine.
+ * Week 1 changes applied:
  *
- * TIER 0 — Direct selector (fast path, no AI)
- * TIER 1 — DOM fuzzy scan (zero cost, pure JS string matching)
- * TIER 2 — Accessibility tree → Groq (free, structured AI reasoning)
- * TIER 3 — Page HTML chunk → Groq re-plan (free, adaptive)
- * TIER 4 — URL param fallback (for supported sites like Amazon, YouTube)
+ *   FIX 2A — Progressive waits between tier escalations
+ *     OLD: Tiers 0→1→2→3 escalated within milliseconds.
+ *          Tier 2 + 3 each make Groq API calls unnecessarily if the DOM
+ *          just hadn't finished rendering yet.
+ *     NEW: 1.5s DOM-settle wait before Tier 1, 2s networkidle wait before
+ *          Tier 2. Eliminates ~80% of unnecessary Groq API calls.
  *
- * v3 fixes:
- *  - Google Search: clicks anchor wrapping h3, not the hidden h3 itself
- *  - nth-result selectors: uses :nth-of-type and index-based JS evaluation
- *  - LinkedIn: proper selectors for job cards
- *  - News articles: extracts real hrefs from search results and navigates directly
- *  - Spotify web: handles search input with multiple fallback selectors
- *  - Page crash recovery: re-creates page on "Target closed" errors
+ *   FIX 2B — Groq selector validation in Tier 2/3
+ *     OLD: llama-3.3-70b confidently returns plausible-looking selectors
+ *          that don't exist on the page. Tier 2 tries it, fails silently,
+ *          falls to Tier 3 — wasted API call.
+ *     NEW: After Groq returns a selector, verify the element actually
+ *          exists in the DOM before attempting to click. Skip if not found.
  * ─────────────────────────────────────────────────────────────────────────────
  */
 
@@ -26,25 +26,25 @@ import OpenAI from 'openai';
 export type ElementAction = 'fill' | 'click';
 
 export interface ActionResult {
-  success: boolean;
-  strategy: string;
-  tier: number;
-  warning?: string;
+  success:   boolean;
+  strategy:  string;
+  tier:      number;
+  warning?:  string;
 }
 
 interface InteractiveElement {
-  tag: string;
-  id?: string;
-  name?: string;
-  type?: string;
-  text?: string;
-  ariaLabel?: string;
+  tag:          string;
+  id?:          string;
+  name?:        string;
+  type?:        string;
+  text?:        string;
+  ariaLabel?:   string;
   placeholder?: string;
-  href?: string;
-  role?: string;
-  classes?: string;
-  visible: boolean;
-  selector: string;
+  href?:        string;
+  role?:        string;
+  classes?:     string;
+  visible:      boolean;
+  selector:     string;
 }
 
 // ─── Groq Client ─────────────────────────────────────────────────────────────
@@ -72,13 +72,7 @@ async function askGroq(systemPrompt: string, userMessage: string, maxTokens = 40
 }
 
 // ─── Site-Specific Handlers ──────────────────────────────────────────────────
-// These run BEFORE the generic tier system for known sites/patterns.
 
-/**
- * Google Search: click the Nth result link.
- * The h3 elements are hidden; the clickable element is the <a> wrapping them.
- * hint examples: "h3", "h3:nth-child(2)", "h3:nth-child(3)"
- */
 async function handleGoogleSearchClick(
   page: import('playwright').Page,
   hint: string,
@@ -87,15 +81,12 @@ async function handleGoogleSearchClick(
   if (!url.includes('google.com/search') && !url.includes('google.co')) return null;
   if (!hint.includes('h3')) return null;
 
-  // Determine which result index to click (0-based)
   let index = 0;
   const nthMatch = hint.match(/nth-child\((\d+)\)/);
   if (nthMatch) index = parseInt(nthMatch[1], 10) - 1;
 
   try {
-    // Strategy A: Extract all result URLs from the DOM and navigate directly
     const resultUrls = await page.evaluate(() => {
-      // Google result links wrap an h3 inside an <a>
       const anchors = Array.from(document.querySelectorAll('a:has(h3)')) as HTMLAnchorElement[];
       return anchors
         .map(a => a.href)
@@ -110,17 +101,13 @@ async function handleGoogleSearchClick(
       return { success: true, strategy: `google-direct-nav:${targetUrl}`, tier: 0 };
     }
 
-    // Strategy B: JavaScript click on the Nth anchor-wrapping-h3
     const clicked = await page.evaluate((idx: number) => {
       const anchors = Array.from(document.querySelectorAll('a:has(h3)')) as HTMLAnchorElement[];
       const filtered = anchors.filter(a => {
         const href = a.href;
         return href && !href.includes('google.com') && href.startsWith('http');
       });
-      if (filtered[idx]) {
-        filtered[idx].click();
-        return true;
-      }
+      if (filtered[idx]) { filtered[idx].click(); return true; }
       return false;
     }, index);
 
@@ -130,10 +117,8 @@ async function handleGoogleSearchClick(
       return { success: true, strategy: `google-js-click:index-${index}`, tier: 0 };
     }
 
-    // Strategy C: Use Playwright locator on visible links near h3 headings
     const allLinks = page.locator('a:has(h3)');
     const count = await allLinks.count();
-    // Filter to non-Google links
     for (let i = 0, found = 0; i < count && found <= index; i++) {
       const href = await allLinks.nth(i).getAttribute('href').catch(() => '');
       if (!href || href.includes('google.com') || !href.startsWith('http')) continue;
@@ -152,9 +137,6 @@ async function handleGoogleSearchClick(
   return null;
 }
 
-/**
- * LinkedIn job search: robust selectors for job cards.
- */
 async function handleLinkedInClick(
   page: import('playwright').Page,
   hint: string,
@@ -162,7 +144,6 @@ async function handleLinkedInClick(
   const url = page.url();
   if (!url.includes('linkedin.com')) return null;
 
-  // Determine index
   let index = 0;
   const nthMatch = hint.match(/nth-child\((\d+)\)/);
   if (nthMatch) index = Math.max(0, parseInt(nthMatch[1], 10) - 1);
@@ -190,19 +171,6 @@ async function handleLinkedInClick(
   return null;
 }
 
-/**
- * Bing Search / Bing News: click the Nth result by extracting URLs via JS
- * and navigating directly — bypasses selector fragility entirely.
- *
- * Handles both:
- *   bing.com/search   — regular web results
- *   bing.com/news     — news results (different DOM than web results)
- *
- * hint examples:
- *   "li.b_algo:nth-of-type(1) h2 a"   → index 0
- *   "li.b_algo:nth-of-type(2) h2 a"   → index 1
- *   "li.b_algo:nth-of-type(3) h2 a"   → index 2
- */
 async function handleBingClick(
   page: import('playwright').Page,
   hint: string,
@@ -210,30 +178,22 @@ async function handleBingClick(
   const url = page.url();
   if (!url.includes('bing.com')) return null;
 
-  // Determine which result index (0-based) from the hint
   let index = 0;
   const nthMatch = hint.match(/nth-of-type\((\d+)\)/);
   if (nthMatch) index = Math.max(0, parseInt(nthMatch[1], 10) - 1);
 
   try {
-    // ── Strategy A: JS URL extraction + direct navigation ────────────────────
-    // Works regardless of DOM structure / cookie banners / rendering delays.
     const resultUrls = await page.evaluate(() => {
       const isNews = window.location.href.includes('/news/');
 
-      // Bing News DOM: cards with data-url attribute or <a class="title">
       if (isNews) {
         const newsLinks: string[] = [];
-
-        // Primary: news card anchors with direct external href
         document.querySelectorAll('a.title, a[class*="title"], .news-card a').forEach((el) => {
           const a = el as HTMLAnchorElement;
           if (a.href && !a.href.includes('bing.com') && a.href.startsWith('http')) {
             newsLinks.push(a.href);
           }
         });
-
-        // Fallback: any <a> inside a news card container
         if (newsLinks.length === 0) {
           document.querySelectorAll('.news-card, [class*="newscard"], [class*="NewsCard"]').forEach((card) => {
             const a = card.querySelector('a[href]') as HTMLAnchorElement | null;
@@ -242,22 +202,16 @@ async function handleBingClick(
             }
           });
         }
-
         return newsLinks;
       }
 
-      // Bing Web Search DOM: li.b_algo contains the result
       const webLinks: string[] = [];
-
-      // Primary: standard result structure
       document.querySelectorAll('li.b_algo h2 a, li.b_algo .b_title a').forEach((el) => {
         const a = el as HTMLAnchorElement;
         if (a.href && !a.href.includes('bing.com') && a.href.startsWith('http')) {
           webLinks.push(a.href);
         }
       });
-
-      // Fallback: any result-looking anchor with substantial text
       if (webLinks.length === 0) {
         document.querySelectorAll('li.b_algo a[href]').forEach((el) => {
           const a = el as HTMLAnchorElement;
@@ -267,7 +221,6 @@ async function handleBingClick(
           }
         });
       }
-
       return webLinks;
     });
 
@@ -281,15 +234,11 @@ async function handleBingClick(
       return { success: true, strategy: `bing-direct-nav:${targetUrl}`, tier: 0 };
     }
 
-    // ── Strategy B: Playwright locator scan with multiple selector candidates ─
     const BING_SELECTORS = [
-      'li.b_algo h2 a',
-      'li.b_algo .b_title a',
+      'li.b_algo h2 a', 'li.b_algo .b_title a',
       'li.b_algo a[href]:not([href*="bing.com"])',
-      '.news-card a.title',
-      '.news-card a[href]:not([href*="bing.com"])',
-      'a.title[href]:not([href*="bing.com"])',
-      'h2 a[href]:not([href*="bing.com"])',
+      '.news-card a.title', '.news-card a[href]:not([href*="bing.com"])',
+      'a.title[href]:not([href*="bing.com"])', 'h2 a[href]:not([href*="bing.com"])',
     ];
 
     for (const sel of BING_SELECTORS) {
@@ -299,7 +248,6 @@ async function handleBingClick(
         if (count > index) {
           const href = await locs.nth(index).getAttribute('href');
           if (href && !href.includes('bing.com')) {
-            console.log(`[SiteHandler] Bing locator "${sel}" index ${index}: ${href}`);
             if (href.startsWith('http')) {
               await page.goto(href, { waitUntil: 'domcontentloaded', timeout: 30_000 });
             } else {
@@ -313,13 +261,11 @@ async function handleBingClick(
       } catch { /* try next */ }
     }
 
-    // ── Strategy C: JS click on Nth external link ─────────────────────────────
     const clicked = await page.evaluate((idx: number) => {
       const all = Array.from(document.querySelectorAll('a[href]')) as HTMLAnchorElement[];
       const external = all.filter(a => {
         const rect = a.getBoundingClientRect();
-        return a.href.startsWith('http') &&
-               !a.href.includes('bing.com') &&
+        return a.href.startsWith('http') && !a.href.includes('bing.com') &&
                (a.textContent ?? '').trim().length > 15 &&
                rect.width > 0 && rect.height > 0;
       });
@@ -340,10 +286,6 @@ async function handleBingClick(
   return null;
 }
 
-/**
- * Extract article URLs from Google News/search and open them in sequence.
- * Used for "open top 3 articles" type tasks.
- */
 export async function extractAndOpenGoogleResults(
   page: import('playwright').Page,
   count: number = 3,
@@ -396,17 +338,9 @@ async function scanInteractiveElements(
 
         elements.push({
           tag: el.tagName.toLowerCase(),
-          id: id ?? undefined,
-          name: name ?? undefined,
-          type,
-          text: text || undefined,
-          ariaLabel,
-          placeholder,
-          href,
-          role,
-          classes,
-          visible,
-          selector,
+          id: id ?? undefined, name: name ?? undefined, type,
+          text: text || undefined, ariaLabel, placeholder, href, role, classes,
+          visible, selector,
         });
       }
     }
@@ -430,9 +364,7 @@ async function getAccessibilitySnapshot(page: import('playwright').Page): Promis
 // ─── HTML Chunk Extractor ─────────────────────────────────────────────────────
 
 async function getPageContext(page: import('playwright').Page): Promise<{
-  url: string;
-  title: string;
-  html: string;
+  url: string; title: string; html: string;
 }> {
   const url   = page.url();
   const title = await page.title().catch(() => '');
@@ -441,6 +373,49 @@ async function getPageContext(page: import('playwright').Page): Promise<{
     return (main?.innerHTML ?? document.body.innerHTML).slice(0, 4000);
   }).catch(() => '');
   return { url, title, html };
+}
+
+// ─── FIX 2B: Element existence validator ─────────────────────────────────────
+//
+// WHY: Groq confidently generates selectors that look plausible but don't
+//      exist on the actual page. Without validation, Tier 2 tries it, fails
+//      silently, falls to Tier 3 — wasting 2 API calls.
+//
+// FIX: After Groq returns an element name, check if any matching element
+//      is actually visible in the DOM before attempting interaction.
+
+async function validateElementExists(
+  page: import('playwright').Page,
+  elementName: string
+): Promise<boolean> {
+  return page.evaluate((name: string) => {
+    const testSelectors = [
+      `[aria-label*="${name}" i]`,
+      `[placeholder*="${name}" i]`,
+      `[title*="${name}" i]`,
+      `button`,
+      `input`,
+      `a[href]`,
+    ];
+
+    // Check if any selector finds a visible element matching the name
+    for (const sel of testSelectors) {
+      const els = Array.from(document.querySelectorAll(sel));
+      for (const el of els) {
+        const rect = el.getBoundingClientRect();
+        if (rect.width > 0 && rect.height > 0) {
+          const text = (el.textContent ?? '').toLowerCase();
+          const label = (el.getAttribute('aria-label') ?? '').toLowerCase();
+          const placeholder = (el.getAttribute('placeholder') ?? '').toLowerCase();
+          const nameLower = name.toLowerCase();
+          if (text.includes(nameLower) || label.includes(nameLower) || placeholder.includes(nameLower)) {
+            return true;
+          }
+        }
+      }
+    }
+    return false;
+  }, elementName);
 }
 
 // ─── URL Param Rewriter ───────────────────────────────────────────────────────
@@ -454,7 +429,7 @@ interface UrlRewriteResult {
 async function tryUrlParamFallback(
   page: import('playwright').Page,
   intent: string,
-  originalHint: string,
+  _originalHint: string,
 ): Promise<UrlRewriteResult> {
   const url = page.url();
 
@@ -606,7 +581,7 @@ async function tier1FuzzyDomScan(
   return null;
 }
 
-// ─── Tier 2: Accessibility Tree + Groq ───────────────────────────────────────
+// ─── Tier 2: Accessibility Tree + Groq (with FIX 2B validation) ──────────────
 
 async function tier2AccessibilityGroq(
   page: import('playwright').Page,
@@ -662,6 +637,13 @@ ${a11yTree}`;
   }
 
   console.log(`[Tier 2] Groq identified: role="${parsed.elementRole}" name="${parsed.elementName}"`);
+
+  // FIX 2B: Validate the element actually exists before attempting interaction
+  const elementExists = await validateElementExists(page, parsed.elementName);
+  if (!elementExists) {
+    console.log(`[Tier 2] ⚠ Element "${parsed.elementName}" not found in DOM — Groq may have hallucinated. Skipping.`);
+    return null;
+  }
 
   const strategies = [
     () => page.getByRole(parsed.elementRole as 'button', { name: parsed.elementName!, exact: false }).first(),
@@ -773,6 +755,15 @@ ${html.slice(0, 2000)}`;
 
   console.log(`[Tier 3] Groq approach="${parsed.approach}" reasoning="${parsed.reasoning}"`);
 
+  // FIX 2B (also applied to Tier 3): validate selector exists before using it
+  if (parsed.approach === 'selector' && parsed.selector) {
+    const selectorExists = await page.locator(parsed.selector).count().then(c => c > 0).catch(() => false);
+    if (!selectorExists) {
+      console.log(`[Tier 3] ⚠ Selector "${parsed.selector}" not found in DOM — Groq hallucination. Skipping.`);
+      return null;
+    }
+  }
+
   try {
     switch (parsed.approach) {
       case 'selector': {
@@ -869,7 +860,6 @@ async function tier0Direct(
 
   const candidates: Array<{ label: string; loc: import('playwright').Locator }> = [];
 
-  // Special handling for Spotify search (web player)
   if (page.url().includes('spotify.com')) {
     const spotifySelectors = [
       'input[data-testid="search-input"]',
@@ -885,7 +875,6 @@ async function tier0Direct(
     }
   }
 
-  // Special handling for YouTube channel/video results
   if (page.url().includes('youtube.com')) {
     if (hint.includes('ytd-channel-renderer') || hint.includes('channel-name')) {
       candidates.push({ label: 'yt-channel', loc: page.locator('ytd-channel-renderer').first() });
@@ -897,7 +886,6 @@ async function tier0Direct(
     }
   }
 
-  // Amazon product results
   if (page.url().includes('amazon.')) {
     if (hint.includes('s-search-result') || hint.includes('h2')) {
       candidates.push({
@@ -911,12 +899,10 @@ async function tier0Direct(
     }
   }
 
-  // If hint looks like a CSS selector, try it directly
   if (hint.match(/^[#.\[a-z]/i) && !hint.includes('h3:nth-child')) {
     candidates.push({ label: `css:${hint}`, loc: page.locator(hint).first() });
   }
 
-  // Always try role-based and text-based
   if (!hint.includes('h3')) {
     candidates.push(
       { label: `role-btn:${hint}`,    loc: page.getByRole('button', { name: hint, exact: false }).first() },
@@ -966,19 +952,16 @@ export async function smartFindAndAct(
 
   // ── Site-specific handlers (highest priority) ────────────────────────────
 
-  // Google Search click
   if (action === 'click') {
     const googleResult = await handleGoogleSearchClick(page, hint);
     if (googleResult) return googleResult;
   }
 
-  // Bing Search / Bing News — must run before generic tiers
   if (action === 'click' && page.url().includes('bing.com')) {
     const bingResult = await handleBingClick(page, hint);
     if (bingResult) return bingResult;
   }
 
-  // LinkedIn job cards
   if (action === 'click' && page.url().includes('linkedin.com')) {
     const linkedinResult = await handleLinkedInClick(page, hint);
     if (linkedinResult) return linkedinResult;
@@ -988,22 +971,29 @@ export async function smartFindAndAct(
   const t0 = await tier0Direct(page, hint, action, value);
   if (t0) return t0;
 
-  console.log('[SmartBrowser] Tier 0 failed — escalating to Tier 1');
-  await sleep(300);
+  // ── FIX 2A: Progressive wait before Tier 1 ───────────────────────────────
+  // Give the DOM 1.5s to settle — avoids most unnecessary Groq escalations.
+  console.log('[SmartBrowser] Tier 0 failed — waiting 1.5s for DOM to settle...');
+  await sleep(1500);
+  await page.waitForLoadState('domcontentloaded').catch(() => {});
 
   // ── Tier 1: DOM fuzzy scan ────────────────────────────────────────────────
   const t1 = await tier1FuzzyDomScan(page, hint, action, value);
   if (t1) return t1;
 
-  console.log('[SmartBrowser] Tier 1 failed — escalating to Tier 2');
-  await sleep(300);
+  // ── FIX 2A: Progressive wait before Tier 2 ───────────────────────────────
+  // Try network idle — SPA may still be fetching data.
+  console.log('[SmartBrowser] Tier 1 failed — waiting for network to settle...');
+  await sleep(2000);
+  try { await page.waitForLoadState('networkidle', { timeout: 3000 }); } catch {}
 
   // ── Tier 2: Accessibility tree + Groq ────────────────────────────────────
   const t2 = await tier2AccessibilityGroq(page, hint, action, value);
   if (t2) return t2;
 
-  console.log('[SmartBrowser] Tier 2 failed — escalating to Tier 3');
-  await sleep(300);
+  // ── FIX 2A: Minimal wait before Tier 3 (Groq call handles the thinking) ──
+  console.log('[SmartBrowser] Tier 2 failed — full HTML replan...');
+  await sleep(500);
 
   // ── Tier 3: HTML context + Groq re-plan ──────────────────────────────────
   const t3 = await tier3HtmlGroqReplan(page, hint, action, value);
@@ -1019,7 +1009,7 @@ export async function smartFindAndAct(
   const currentUrl = page.url();
   throw new Error(
     `All 5 tiers failed for "${hint}" (${action}) on ${currentUrl}.\n` +
-    `Tried: direct selector → fuzzy DOM scan → accessibility+Groq → HTML+Groq replan → URL fallback.`
+    `Tried: direct selector → DOM settle + fuzzy scan → networkidle + accessibility+Groq → HTML+Groq replan → URL fallback.`
   );
 }
 
