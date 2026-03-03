@@ -4,17 +4,40 @@
     "request": "search for the latest AI news and open top 3 articles and create a Word document",
     "keywords": ["search", "news", "articles", "document", "report", "summarize", "research"],
     "steps": [
-      { "capability": "browser_open", "parameters": { "url": "https://www.bing.com/news/search?q=latest+AI+news" }, "safety_risk": "low" },
-      { "capability": "browser_click", "parameters": { "selector": "li.b_algo:nth-of-type(1) h2 a" }, "safety_risk": "low" },
+      { "capability": "browser_open", "parameters": { "url": "https://www.bing.com/search?q=latest+AI+news+2025" }, "safety_risk": "low" },
+      { "capability": "browser_extract_results", "parameters": { "variable_name": "results", "count": 5 }, "safety_risk": "low" },
+      { "capability": "browser_open", "parameters": { "url": "{{results_0_url}}" }, "safety_risk": "low" },
       { "capability": "browser_read_page", "parameters": { "variable_name": "article1", "topic": "AI news" }, "safety_risk": "low" },
-      { "capability": "browser_open", "parameters": { "url": "https://www.bing.com/news/search?q=latest+AI+news" }, "safety_risk": "low" },
-      { "capability": "browser_click", "parameters": { "selector": "li.b_algo:nth-of-type(2) h2 a" }, "safety_risk": "low" },
+      { "capability": "browser_open", "parameters": { "url": "{{results_1_url}}" }, "safety_risk": "low" },
       { "capability": "browser_read_page", "parameters": { "variable_name": "article2", "topic": "AI news" }, "safety_risk": "low" },
-      { "capability": "browser_open", "parameters": { "url": "https://www.bing.com/news/search?q=latest+AI+news" }, "safety_risk": "low" },
-      { "capability": "browser_click", "parameters": { "selector": "li.b_algo:nth-of-type(3) h2 a" }, "safety_risk": "low" },
+      { "capability": "browser_open", "parameters": { "url": "{{results_2_url}}" }, "safety_risk": "low" },
       { "capability": "browser_read_page", "parameters": { "variable_name": "article3", "topic": "AI news" }, "safety_risk": "low" },
       { "capability": "create_file", "parameters": { "path": "Desktop/Summary.txt", "content": "Summary\n\nARTICLE 1\n{{article1}}\n\nARTICLE 2\n{{article2}}\n\nARTICLE 3\n{{article3}}" }, "safety_risk": "low" },
       { "capability": "run_shell_command", "parameters": { "command": "notepad ~/Desktop/Summary.txt" }, "safety_risk": "low" }
+    ]
+  },
+  {
+    "category": "browser_search_excel",
+    "request": "search for the latest Iran and Israel war and make an Excel sheet",
+    "keywords": ["search", "excel", "xlsx", "spreadsheet", "sheet", "war", "news", "latest", "topic", "results", "make", "create"],
+    "steps": [
+      { "capability": "browser_open", "parameters": { "url": "https://www.bing.com/search?q=latest+Iran+Israel+war+news" }, "safety_risk": "low" },
+      { "capability": "browser_extract_results", "parameters": { "variable_name": "results", "count": 5 }, "safety_risk": "low" },
+      { "capability": "browser_open", "parameters": { "url": "{{results_0_url}}" }, "safety_risk": "low" },
+      { "capability": "browser_read_page", "parameters": { "variable_name": "article1", "topic": "Iran Israel war" }, "safety_risk": "low" },
+      { "capability": "browser_open", "parameters": { "url": "{{results_1_url}}" }, "safety_risk": "low" },
+      { "capability": "browser_read_page", "parameters": { "variable_name": "article2", "topic": "Iran Israel war" }, "safety_risk": "low" },
+      { "capability": "browser_open", "parameters": { "url": "{{results_2_url}}" }, "safety_risk": "low" },
+      { "capability": "browser_read_page", "parameters": { "variable_name": "article3", "topic": "Iran Israel war" }, "safety_risk": "low" },
+      {
+        "capability": "create_file",
+        "parameters": {
+          "path": "Desktop/make_excel.py",
+          "content": "import subprocess, sys, os\ntry:\n    import openpyxl\nexcept ImportError:\n    subprocess.check_call([sys.executable,'-m','pip','install','openpyxl','--quiet'])\n    import openpyxl\nfrom openpyxl.styles import Font, PatternFill, Alignment\nwb = openpyxl.Workbook()\nws = wb.active\nws.title = 'News Results'\nheaders = ['#', 'Title', 'Summary']\nws.append(headers)\nfor cell in ws[1]:\n    cell.font = Font(bold=True, color='FFFFFF')\n    cell.fill = PatternFill('solid', fgColor='1F4E79')\narticles = [\n    (1, '{{results_0_title}}', '{{article1}}'),\n    (2, '{{results_1_title}}', '{{article2}}'),\n    (3, '{{results_2_title}}', '{{article3}}'),\n]\nfor num, title, summary in articles:\n    ws.append([num, title, summary])\nfor row in ws.iter_rows(min_row=2):\n    for cell in row:\n        cell.alignment = Alignment(wrap_text=True, vertical='top')\nws.column_dimensions['A'].width = 5\nws.column_dimensions['B'].width = 50\nws.column_dimensions['C'].width = 80\npath = os.path.expanduser('~/Desktop/Results.xlsx')\nwb.save(path)\nif sys.platform == 'win32':\n    os.startfile(path)\nelif sys.platform == 'darwin':\n    subprocess.run(['open', path])\nprint('Saved:', path)\n"
+        },
+        "safety_risk": "low"
+      },
+      { "capability": "run_shell_command", "parameters": { "command": "python ~/Desktop/make_excel.py" }, "safety_risk": "low" }
     ]
   },
   {
@@ -22,9 +45,7 @@
     "request": "search YouTube for lofi hip hop and play the first video",
     "keywords": ["youtube", "video", "play", "watch", "music", "search"],
     "steps": [
-      { "capability": "browser_open", "parameters": { "url": "https://www.youtube.com" }, "safety_risk": "low" },
-      { "capability": "browser_fill", "parameters": { "selector": "input[name='search_query']", "value": "lofi hip hop" }, "safety_risk": "low" },
-      { "capability": "browser_click", "parameters": { "selector": "button[aria-label='Search']" }, "safety_risk": "low" },
+      { "capability": "browser_open", "parameters": { "url": "https://www.youtube.com/results?search_query=lofi+hip+hop" }, "safety_risk": "low" },
       { "capability": "browser_click", "parameters": { "selector": "ytd-video-renderer a#video-title" }, "safety_risk": "low" }
     ]
   },
@@ -68,7 +89,7 @@
     "keywords": ["linkedin", "jobs", "career", "hiring", "work", "position", "developer"],
     "steps": [
       { "capability": "browser_open", "parameters": { "url": "https://www.linkedin.com/jobs/search?keywords=Python+Developer&location=Bangalore" }, "safety_risk": "low" },
-      { "capability": "wait", "parameters": { "seconds": 3 }, "safety_risk": "low" },
+      { "capability": "browser_wait_for_element", "parameters": { "selector": ".jobs-search-results-list", "seconds": 10 }, "safety_risk": "low" },
       { "capability": "browser_extract_results", "parameters": { "variable_name": "jobs", "count": 5 }, "safety_risk": "low" },
       { "capability": "browser_open", "parameters": { "url": "{{jobs_0_url}}" }, "safety_risk": "low" },
       { "capability": "browser_read_page", "parameters": { "variable_name": "job1", "topic": "job listing" }, "safety_risk": "low" },
