@@ -16,24 +16,30 @@ export type Capability =
   | 'app_focus_window'
   | 'app_click'
   | 'app_type'
-  | 'app_screenshot'    // NEW: take screenshot of app window
-  | 'app_verify'        // NEW: verify text is visible in app
+  | 'app_screenshot'
+  | 'app_verify'
+  | 'browser_wait_for_element'    
+  | 'browser_get_page_state'      
 
 export type SafetyRisk = 'low' | 'medium' | 'high'
 
 export interface StepParameters {
-  app_name?:     string
-  query?:        string
-  command?:      string
-  url?:          string
-  selector?:     string
-  value?:        string
-  text?:         string
-  path?:         string
-  destination?:  string
-  content?:      string
-  seconds?:      number
-  element_name?: string
+  app_name?:             string
+  query?:                string
+  command?:              string
+  url?:                  string
+  selector?:             string
+  value?:                string
+  text?:                 string
+  path?:                 string
+  destination?:          string
+  content?:              string
+  seconds?:              number
+  element_name?:         string
+  variable_name?:        string
+  topic?:                string
+  count?:                number
+  target_description?:   string   // for browser_screenshot_analyze (Week 3)
 }
 
 export interface PlanStep {
@@ -45,11 +51,11 @@ export interface PlanStep {
 }
 
 export interface Plan {
-  intent:               string
-  confidence:           number
+  intent:                string
+  confidence:            number
   requires_confirmation: boolean
-  summary:              string
-  steps:                PlanStep[]
+  summary:               string
+  steps:                 PlanStep[]
 }
 
 // ─── Review Types ─────────────────────────────────────────────────────────────
@@ -70,18 +76,20 @@ export interface ReviewResult {
 export type ExecutionStatus = 'idle' | 'executing' | 'completed' | 'failed' | 'stopped'
 
 export interface StepResult {
-  success:    boolean
-  message?:   string
-  stdout?:    string
-  stderr?:    string
-  url?:       string
-  title?:     string
-  path?:      string
-  warning?:   string
-  strategy?:  string
-  electron?:  boolean
-  cdp_port?:  number
-  elements?:  Array<{ title: string; control_type: string; auto_id: string }>
+  success:     boolean
+  message?:    string
+  stdout?:     string
+  stderr?:     string
+  url?:        string
+  title?:      string
+  path?:       string
+  warning?:    string
+  strategy?:   string
+  electron?:   boolean
+  cdp_port?:   number
+  navigated?:  boolean           // NEW: did click cause navigation
+  changeType?: string            // NEW: 'navigation' | 'content-update' | 'none'
+  elements?:   Array<{ title: string; control_type: string; auto_id: string }>
   [key: string]: unknown
 }
 
