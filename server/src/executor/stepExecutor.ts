@@ -35,24 +35,42 @@ function resolvePath(filePath: string): string {
   return path.isAbsolute(filePath) ? filePath : path.join(home, filePath);
 }
 
+// ─── FIX 1A: Smart waitUntil per domain ──────────────────────────────────────
+//
+// WHY: domcontentloaded fires before React/Vue renders on SPAs.
+// LinkedIn, Spotify, WhatsApp Web etc. need "networkidle" + extra wait.
+// YouTube needs "load" + wait. Others are fine with "domcontentloaded".
+//
+// IMPACT: Tier 0 now runs against actual DOM content → eliminates most
+//         unnecessary Groq API escalations (tiers 2/3).
+
+const SPA_DOMAINS = new Set([
+  'linkedin.com', 'spotify.com', 'whatsapp.com', 'discord.com',
+  'notion.so', 'figma.com', 'slack.com', 'trello.com',
+  'asana.com', 'monday.com', 'airtable.com',
+]);
+
+function getWaitStrategy(url: string): {
+  waitUntil: 'domcontentloaded' | 'networkidle' | 'load';
+  extraWait: number;
+} {
+  const isSpa = [...SPA_DOMAINS].some(d => url.includes(d));
+  if (isSpa) return { waitUntil: 'networkidle', extraWait: 2500 };
+  if (url.includes('youtube.com')) return { waitUntil: 'load', extraWait: 1500 };
+  return { waitUntil: 'domcontentloaded', extraWait: 800 };
+}
+
 // ─── Anti-Bot Browser Configuration ──────────────────────────────────────────
-// Prevents Google / Cloudflare "Are you human?" detection.
 
 const STEALTH_ARGS = [
   '--no-sandbox',
   '--disable-setuid-sandbox',
   '--start-maximized',
-
-  // ★ The key anti-bot flags ★
   '--disable-blink-features=AutomationControlled',
   '--disable-automation',
-
-  // Remove "Chrome is being controlled by automated test software" banner
   '--disable-infobars',
   '--no-first-run',
   '--no-default-browser-check',
-
-  // Realistic browser behavior
   '--disable-features=IsolateOrigins,site-per-process',
   '--disable-web-security',
   '--allow-running-insecure-content',
@@ -64,14 +82,10 @@ const REAL_USER_AGENT =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36';
 
 // ─── Stealth Script Injection ─────────────────────────────────────────────────
-// Patches the DOM/JS properties that bot detectors check BEFORE the page loads.
 
 async function applyStealthScripts(page: import('playwright').Page): Promise<void> {
   await page.addInitScript(() => {
-    // 1. Remove navigator.webdriver — THE primary bot signal
     Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
-
-    // 2. Spoof plugins array (headless has 0 plugins, real Chrome has several)
     Object.defineProperty(navigator, 'plugins', {
       get: () => {
         const fakePlugins = [
@@ -82,19 +96,13 @@ async function applyStealthScripts(page: import('playwright').Page): Promise<voi
         return Object.assign([], fakePlugins, { item: (i: number) => fakePlugins[i] });
       },
     });
-
-    // 3. Correct languages
     Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'] });
-
-    // 4. Inject window.chrome (missing in headless)
     (window as any).chrome = {
       runtime: { id: undefined },
       loadTimes: () => ({}),
       csi: () => ({}),
       app: {},
     };
-
-    // 5. Patch permission query (Cloudflare checks this)
     const originalQuery = window.navigator.permissions?.query;
     if (originalQuery) {
       (window.navigator.permissions as any).query = (params: PermissionDescriptor) =>
@@ -102,14 +110,10 @@ async function applyStealthScripts(page: import('playwright').Page): Promise<voi
           ? Promise.resolve({ state: Notification.permission } as PermissionStatus)
           : originalQuery.call(window.navigator.permissions, params);
     }
-
-    // 6. Fix screen size (headless often reports 0×0)
     try {
       Object.defineProperty(screen, 'availWidth',  { get: () => 1920 });
       Object.defineProperty(screen, 'availHeight', { get: () => 1040 });
-    } catch { /* already defined — safe to ignore */ }
-
-    // 7. WebGL vendor spoofing
+    } catch { /* ignore */ }
     try {
       const origGetParam = WebGLRenderingContext.prototype.getParameter;
       WebGLRenderingContext.prototype.getParameter = function (parameter: number) {
@@ -128,15 +132,18 @@ async function isPageAlive(page: import('playwright').Page): Promise<boolean> {
   catch { return false; }
 }
 
+/** Expose the live page instance for mid-execution re-planning. */
+export function getLivePage(): import('playwright').Page | null {
+  return pageInstance;
+}
+
 async function ensurePlaywright(): Promise<import('playwright').Page> {
-  // Return existing page if still alive
   if (pageInstance) {
     if (await isPageAlive(pageInstance)) return pageInstance;
 
     console.log('[Browser] Page closed — recovering...');
     pageInstance = null;
 
-    // Try creating new page in existing context
     if (browserContext) {
       try {
         pageInstance = await browserContext.newPage();
@@ -146,19 +153,16 @@ async function ensurePlaywright(): Promise<import('playwright').Page> {
       } catch { browserContext = null; }
     }
 
-    // Full restart
     try { await browserInstance?.close(); } catch { /* ignore */ }
     browserInstance = null;
   }
 
   const { chromium } = await import('playwright');
 
-  // Try real Chrome → Edge → bundled Chromium (in that order)
-  // Real Chrome has the best anti-detection fingerprint
   const configs = [
-    { channel: 'msedge',  args: STEALTH_ARGS, headless: false },   // Microsoft Edge — preferred
-    { channel: 'chrome',  args: STEALTH_ARGS, headless: false },   // Chrome fallback
-    {                      args: STEALTH_ARGS, headless: false },   // bundled Chromium last resort
+    { channel: 'msedge',  args: STEALTH_ARGS, headless: false },
+    { channel: 'chrome',  args: STEALTH_ARGS, headless: false },
+    {                      args: STEALTH_ARGS, headless: false },
   ];
 
   for (const cfg of configs) {
@@ -174,13 +178,11 @@ async function ensurePlaywright(): Promise<import('playwright').Page> {
         browserInstance = await chromium.launch({ args: STEALTH_ARGS, headless: false });
         break;
       }
-      // Try next config
     }
   }
 
   if (!browserInstance) throw new Error('Could not launch browser. Run: npx playwright install chromium');
 
-  // Create context with full realistic fingerprint
   browserContext = await browserInstance.newContext({
     viewport: { width: 1280, height: 800 },
     userAgent: REAL_USER_AGENT,
@@ -208,7 +210,21 @@ async function ensurePlaywright(): Promise<import('playwright').Page> {
   return pageInstance;
 }
 
-// ─── Bot Detection Handler ────────────────────────────────────────────────────
+// ─── FIX 1E: Bot Detection (hard throw instead of silent continue) ────────────
+//
+// WHY: Old code logged "Continuing despite bot detection" and pressed on.
+// The next browserReadPage() would read the CAPTCHA page content and store it
+// in articleStore as if it were real article text — garbage in, garbage out.
+//
+// FIX: Throw a typed error after 20s so the executor triggers retry/replan.
+// Also saves the blocked URL so adaptive workarounds can try alternatives.
+
+export class BotDetectionError extends Error {
+  constructor(public readonly blockedUrl: string, message: string) {
+    super(message);
+    this.name = 'BotDetectionError';
+  }
+}
 
 async function handleBotDetection(page: import('playwright').Page): Promise<void> {
   const title = await page.title().catch(() => '');
@@ -228,7 +244,6 @@ async function handleBotDetection(page: import('playwright').Page): Promise<void
 
   console.log('[Browser] ⚠ Bot detection page detected — waiting for auto-pass...');
 
-  // With real Chrome + stealth flags, Cloudflare usually auto-passes in 3-8 seconds
   for (let i = 0; i < 20; i++) {
     await sleep(1000);
     const newTitle = await page.title().catch(() => '');
@@ -240,7 +255,6 @@ async function handleBotDetection(page: import('playwright').Page): Promise<void
       return;
     }
 
-    // After 5s, try gentle mouse movements to simulate human
     if (i === 5) {
       try {
         await page.mouse.move(400 + Math.random() * 400, 300 + Math.random() * 200);
@@ -250,7 +264,19 @@ async function handleBotDetection(page: import('playwright').Page): Promise<void
     }
   }
 
-  console.log('[Browser] Continuing despite bot detection (stealth mode active)');
+  // FIX 1E: Hard throw instead of silent continue
+  const finalTitle = await page.title().catch(() => '');
+  const isReallyBlocked = botSignals.some(s => finalTitle.toLowerCase().includes(s));
+
+  if (isReallyBlocked) {
+    throw new BotDetectionError(
+      url,
+      `Bot detection active on ${url} after 20s — ` +
+      `try a different URL or add stealth cookies for this domain`
+    );
+  }
+
+  console.log('[Browser] ✓ Bot detection cleared (stealth mode worked)');
 }
 
 // ─── Main Dispatcher ──────────────────────────────────────────────────────────
@@ -260,35 +286,36 @@ export async function executeStep(step: PlanStep): Promise<StepResult> {
   console.log(`[Executor] ${capability}`, parameters);
 
   switch (capability) {
-    case 'open_application':  return openApplication(parameters.app_name);
-    case 'set_wallpaper':     return setWallpaper(parameters.query);
-    case 'run_shell_command': return runShellCommand(parameters.command);
-    case 'browser_open':      return browserOpen(parameters.url);
-    case 'browser_fill':      return browserFill(parameters.selector, parameters.value);
-    case 'browser_click':     return browserClick(parameters.selector);
+    case 'open_application':       return openApplication(parameters.app_name);
+    case 'set_wallpaper':          return setWallpaper(parameters.query);
+    case 'run_shell_command':      return runShellCommand(parameters.command);
+    case 'browser_open':           return browserOpen(parameters.url);
+    case 'browser_fill':           return browserFill(parameters.selector, parameters.value);
+    case 'browser_click':          return browserClick(parameters.selector);
     case 'browser_read_page':      return browserReadPage(parameters.variable_name, parameters.topic);
     case 'browser_extract_results': return browserExtractResults(parameters.variable_name, parameters.count ?? 10);
-    case 'type_text':         return typeText(parameters.text);
-    case 'create_file':       return createFile(parameters.path, parameters.content ?? '');
-    case 'create_folder':     return createFolder(parameters.path);
-    case 'wait':              return wait(parameters.seconds ?? 1);
-    case 'download_file':     return downloadFileCapability(parameters.url, parameters.destination ?? parameters.path);
-    case 'app_find_window':   return appFindWindowStep(parameters.app_name, parameters.seconds);
-    case 'app_focus_window':  return appFocusWindowStep(parameters.app_name);
-    case 'app_click':         return appClickStep(parameters.app_name, parameters.element_name);
-    case 'app_type':          return appTypeStep(parameters.app_name, parameters.element_name, parameters.text);
-    case 'app_screenshot':    return appScreenshotStep(parameters.app_name);
-    case 'app_verify':        return appVerifyStep(parameters.app_name, parameters.text);
+    case 'browser_wait_for_element': return browserWaitForElement(parameters.selector, parameters.seconds ?? 10);
+    case 'browser_get_page_state': return browserGetPageState();
+    case 'type_text':              return typeText(parameters.text);
+    case 'create_file':            return createFile(parameters.path, parameters.content ?? '');
+    case 'create_folder':          return createFolder(parameters.path);
+    case 'wait':                   return wait(parameters.seconds ?? 1);
+    case 'download_file':          return downloadFileCapability(parameters.url, parameters.destination ?? parameters.path);
+    case 'app_find_window':        return appFindWindowStep(parameters.app_name, parameters.seconds);
+    case 'app_focus_window':       return appFocusWindowStep(parameters.app_name);
+    case 'app_click':              return appClickStep(parameters.app_name, parameters.element_name);
+    case 'app_type':               return appTypeStep(parameters.app_name, parameters.element_name, parameters.text);
+    case 'app_screenshot':         return appScreenshotStep(parameters.app_name);
+    case 'app_verify':             return appVerifyStep(parameters.app_name, parameters.text);
     default: throw new Error(`Unknown capability: ${capability}`);
   }
 }
 
-// ─── Browser Capabilities ─────────────────────────────────────────────────────
+// ─── FIX 1A + 1D: Browser Open with smart wait + click verification ───────────
 
 async function browserOpen(url: string | undefined): Promise<StepResult> {
   if (!url) throw new Error('url is required');
 
-  // Resolve {{variable}} templates — e.g. "{{jobs_0_url}}" → actual URL from articleStore
   url = url.replace(/\{\{([^}]+)\}\}/g, (match, key) => {
     const val = articleStore[key.trim()];
     if (val) {
@@ -300,18 +327,69 @@ async function browserOpen(url: string | undefined): Promise<StepResult> {
   });
 
   if (!url.startsWith('http://') && !url.startsWith('https://')) {
-    // ★ Use Bing (Edge default search) — Google blocks automated browsers with CAPTCHA
     url = (!url.includes('.') || url.includes(' '))
       ? `https://www.bing.com/search?q=${encodeURIComponent(url)}`
       : `https://${url}`;
   }
+
   const page = await ensurePlaywright();
-  await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30_000 });
-  await sleep(1500);
+
+  // FIX 1A: Use smart wait strategy instead of always domcontentloaded
+  const { waitUntil, extraWait } = getWaitStrategy(url);
+  console.log(`[browserOpen] waitUntil="${waitUntil}" extraWait=${extraWait}ms for ${url}`);
+
+  await page.goto(url, { waitUntil, timeout: 35_000 });
+  await sleep(extraWait);
   await handleBotDetection(page);
+
   const title = await page.title().catch(() => url!);
   console.log(`[Browser] Loaded: "${title}" — ${url}`);
   return { success: true, url, title, message: `Opened ${url} — "${title}"` };
+}
+
+// ─── FIX 1D: Post-click verification ─────────────────────────────────────────
+//
+// WHY: After clicking, NEXUS used to sleep 1200ms and move on blindly.
+// A failed click (due to overlay, timing, stale element) was invisible.
+//
+// FIX: After every click, check:
+//   1. Did the URL change? (navigation click worked)
+//   2. Did visible content change? (modal opened, element appeared)
+//   3. If neither changed AND the selector looked like a link → warn
+//
+// This uses a lightweight DOM snapshot (text length + link count) instead of
+// full screenshot diff — fast and doesn't need vision API.
+
+async function getPageSnapshot(page: import('playwright').Page): Promise<{ url: string; textLen: number; linkCount: number }> {
+  try {
+    const snap = await page.evaluate(() => ({
+      url:       window.location.href,
+      textLen:   (document.body.textContent ?? '').length,
+      linkCount: document.querySelectorAll('a[href]').length,
+    }));
+    return snap;
+  } catch {
+    return { url: page.url(), textLen: 0, linkCount: 0 };
+  }
+}
+
+async function verifyClickEffect(
+  page: import('playwright').Page,
+  snapshotBefore: { url: string; textLen: number; linkCount: number }
+): Promise<{ changed: boolean; newUrl: string; newTitle: string; changeType: string }> {
+  await sleep(1500);
+  const after = await getPageSnapshot(page);
+  const newTitle = await page.title().catch(() => '');
+
+  const urlChanged     = after.url !== snapshotBefore.url;
+  const contentChanged = Math.abs(after.textLen - snapshotBefore.textLen) > 200;
+  const changed = urlChanged || contentChanged;
+
+  let changeType = 'none';
+  if (urlChanged)     changeType = 'navigation';
+  else if (contentChanged) changeType = 'content-update';
+
+  return { changed, newUrl: after.url, newTitle, changeType };
 }
 
 async function browserFill(selector: string | undefined, value: string | undefined): Promise<StepResult> {
@@ -319,10 +397,8 @@ async function browserFill(selector: string | undefined, value: string | undefin
   if (value === undefined) throw new Error('value is required');
   const page = await ensurePlaywright();
 
-  // Human-like pause before typing
   await sleep(300 + Math.random() * 200);
 
-  // Special: contenteditable (WhatsApp, etc.)
   if (selector.includes('contenteditable')) {
     try {
       const loc = page.locator(selector).first();
@@ -356,25 +432,42 @@ async function browserClick(selector: string | undefined): Promise<StepResult> {
     throw new Error('Page was closed before click');
   }
 
-  // Human-like pause before clicking
   await sleep(200 + Math.random() * 300);
 
+  // FIX 1D: Snapshot before click for verification
+  const snapshotBefore = await getPageSnapshot(page);
+
   const result = await smartFindAndAct(page, selector, 'click');
-  await sleep(1200);
+
+  // FIX 1D: Verify the click had an effect
+  const verify = await verifyClickEffect(page, snapshotBefore);
+
+  // Warn if URL-type selector (links) didn't cause navigation
+  const isLinkSelector = selector.includes('h2') || selector.includes('href') ||
+                         selector.includes('a[') || selector.includes('title');
+  const warning = (!verify.changed && isLinkSelector)
+    ? `Click may not have navigated — URL/content unchanged after 1.5s (changeType: ${verify.changeType})`
+    : undefined;
+
+  if (warning) {
+    console.warn(`[browserClick] ⚠ ${warning}`);
+  }
 
   const livePage = await ensurePlaywright();
   await handleBotDetection(livePage);
-  const title = await livePage.title().catch(() => '');
 
   return {
     success: true,
-    message: `Clicked via ${result.strategy} (tier ${result.tier})${title ? ` → "${title}"` : ''}`,
-    ...(result.warning ? { warning: result.warning } : {}),
+    message: `Clicked via ${result.strategy} (tier ${result.tier}) → "${verify.newTitle || verify.newUrl}"`,
+    url: verify.newUrl,
+    navigated: verify.changed,
+    changeType: verify.changeType,
+    ...(warning ? { warning } : {}),
+    ...(result.warning ? { strategyWarning: result.warning } : {}),
   };
 }
 
 // ─── Article Store ────────────────────────────────────────────────────────────
-// Holds extracted article summaries across steps so create_file can use them.
 
 const articleStore: Record<string, string> = {};
 
@@ -386,10 +479,25 @@ export function clearArticleStore(): void {
   Object.keys(articleStore).forEach(k => delete articleStore[k]);
 }
 
-// ─── browser_read_page ────────────────────────────────────────────────────────
-// Reads the current browser page, extracts the main text, summarizes it via
-// Groq, and stores the result in articleStore[variable_name].
-// The create_file step can use {{variable_name}} in its content template.
+// ─── FIX 1B: browserReadPage — honest failure ─────────────────────────────────
+//
+// WHY: Old code returned success: true with fallback text "Could not extract..."
+// when rawText < 100 chars. create_file happily wrote this garbage into reports.
+// The task was marked successful but the output was worthless.
+//
+// FIX: Throw a typed ContentExtractionError so the executor retries or replans.
+// Also explicitly detect bot/CAPTCHA pages before attempting extraction.
+
+export class ContentExtractionError extends Error {
+  constructor(
+    public readonly reason: 'bot_detection' | 'content_too_short' | 'extraction_failed',
+    public readonly pageUrl: string,
+    message: string
+  ) {
+    super(message);
+    this.name = 'ContentExtractionError';
+  }
+}
 
 async function browserReadPage(
   variableName: string | undefined,
@@ -399,7 +507,23 @@ async function browserReadPage(
   const url   = page.url();
   const title = await page.title().catch(() => 'Unknown');
 
-  // Extract main text — remove clutter first
+  // FIX 1B: Detect bot/CAPTCHA page BEFORE attempting extraction
+  const isBotPage = await page.evaluate(() => {
+    const t = document.title.toLowerCase();
+    return t.includes('just a moment') || t.includes('access denied') ||
+           t.includes('are you human') || t.includes('captcha') ||
+           t.includes('checking your browser');
+  }).catch(() => false);
+
+  if (isBotPage) {
+    throw new ContentExtractionError(
+      'bot_detection',
+      url,
+      `Bot detection active on ${url} — cannot extract content`
+    );
+  }
+
+  // Extract main text
   const rawText = await page.evaluate(() => {
     const REMOVE = ['script', 'style', 'nav', 'header', 'footer', 'aside',
                     '[class*="ad"]', '[id*="ad"]', '[class*="cookie"]',
@@ -422,10 +546,14 @@ async function browserReadPage(
     return (document.body.textContent ?? '').replace(/\s+/g, ' ').trim().slice(0, 4000);
   }).catch(() => '');
 
+  // FIX 1B: Throw honestly instead of returning garbage content
   if (!rawText || rawText.length < 100) {
-    const fallback = `${title} — (Could not extract article text from ${url})`;
-    if (variableName) articleStore[variableName] = fallback;
-    return { success: true, message: `Page text too short, stored fallback`, summary: fallback };
+    throw new ContentExtractionError(
+      'content_too_short',
+      url,
+      `Page content too short (${rawText.length} chars) on ${url} — ` +
+      `page may not have loaded fully or requires authentication`
+    );
   }
 
   // Summarize via Groq
@@ -467,15 +595,14 @@ async function browserReadPage(
   return { success: true, message: `Summarized: "${title}"`, summary: result };
 }
 
-// ─── browser_extract_results ──────────────────────────────────────────────────
-// The universal "get all results from this page" capability.
-// Works on ANY site — search results, job boards, product listings, news feeds.
-// Extracts title + URL for every meaningful link on the page, stores as JSON
-// in articleStore[variable_name]. The planner can then browser_open each URL.
+// ─── FIX 1C: browserExtractResults — resolve relative URLs ───────────────────
 //
-// Usage in plan:
-//   { capability: "browser_extract_results", parameters: { variable_name: "jobs", count: 5 } }
-// Then access results: {{jobs}} in create_file, or planner uses extracted URLs directly.
+// WHY: LinkedIn, Indeed, Naukri, Glassdoor all use relative paths like
+// /jobs/view/12345 or /job-listing/abc. The old filter
+// `if (!href.startsWith("http"))` silently dropped ALL of these.
+// Result: empty results array, task fails, but returns success: true.
+//
+// FIX: Resolve relative URLs to absolute using window.location inside evaluate().
 
 async function browserExtractResults(
   variableName: string | undefined,
@@ -486,8 +613,6 @@ async function browserExtractResults(
 
   console.log(`[browserExtractResults] Scanning page: ${pageUrl}`);
 
-  // Universal JS extractor — works on any site
-  // Strategy: find all meaningful links with visible text, ranked by quality
   const extracted = await page.evaluate((maxCount: number) => {
     interface ResultItem {
       title: string;
@@ -499,77 +624,82 @@ async function browserExtractResults(
     const results: ResultItem[] = [];
     const seen = new Set<string>();
 
-    // Noise patterns to skip
     const SKIP_PATTERNS = [
       /^(javascript:|mailto:|tel:|#)/i,
       /(login|signin|sign-in|logout|signup|register|account|privacy|terms|cookie|help|support|about|contact|adverti|careers|press)/i,
       /\.(css|js|png|jpg|jpeg|gif|svg|ico|pdf|zip|xml|json)$/i,
     ];
 
-    // Current domain for filtering internal nav
     const currentDomain = window.location.hostname;
+    const currentOrigin = window.location.origin;
+    const currentProtocol = window.location.protocol;
 
-    // Score a link — higher = more likely to be a real result
-    function scoreLink(a: HTMLAnchorElement, text: string): number {
+    // FIX 1C: Resolve any URL (relative or absolute) to an absolute URL
+    function resolveUrl(href: string): string | null {
+      if (!href) return null;
+      if (href.startsWith('http://') || href.startsWith('https://')) return href;
+      if (href.startsWith('//')) return `${currentProtocol}${href}`;
+      if (href.startsWith('/')) return `${currentOrigin}${href}`;
+      if (href.startsWith('javascript:') || href.startsWith('mailto:') || href.startsWith('#')) return null;
+      // Relative path
+      return `${currentOrigin}/${href}`;
+    }
+
+    function scoreLink(a: HTMLAnchorElement, text: string, absoluteHref: string): number {
       let score = 0;
-      const href = a.href;
       const rect = a.getBoundingClientRect();
 
-      // Must be visible
       if (rect.width === 0 || rect.height === 0) return -1;
       if (rect.top < 0 || rect.top > window.innerHeight * 3) return -1;
 
-      // Good signs
       if (text.length > 20) score += 3;
       if (text.length > 50) score += 2;
-      if (rect.top > 100) score += 1; // Not in header
-      if (href.includes('/jobs/') || href.includes('/job/')) score += 5;
-      if (href.includes('/article') || href.includes('/post') || href.includes('/news')) score += 4;
-      if (href.includes('/product') || href.includes('/item') || href.includes('/dp/')) score += 4;
-      if (href.includes('/profile') || href.includes('/company')) score += 3;
-
-      // Bad signs
-      if (href.includes(currentDomain) && href.split('/').length < 5) score -= 2; // Short internal link
+      if (rect.top > 100) score += 1;
+      if (absoluteHref.includes('/jobs/') || absoluteHref.includes('/job/')) score += 5;
+      if (absoluteHref.includes('/article') || absoluteHref.includes('/post') || absoluteHref.includes('/news')) score += 4;
+      if (absoluteHref.includes('/product') || absoluteHref.includes('/item') || absoluteHref.includes('/dp/')) score += 4;
+      if (absoluteHref.includes('/profile') || absoluteHref.includes('/company')) score += 3;
+      if (absoluteHref.includes(currentDomain) && absoluteHref.split('/').length < 5) score -= 2;
       if (text.length < 10) score -= 2;
 
       return score;
     }
 
-    // Get description near a link
     function getNearbyText(el: Element): string {
-      // Check siblings and parent text
       const parent = el.closest('li, article, [class*="card"], [class*="item"], [class*="result"], [class*="job"], [class*="product"]');
       if (parent) {
-        const text = (parent.textContent ?? '').replace(/\s+/g, ' ').trim();
-        return text.slice(0, 200);
+        return (parent.textContent ?? '').replace(/\s+/g, ' ').trim().slice(0, 200);
       }
       return '';
     }
 
-    // Collect all anchor elements
     const anchors = Array.from(document.querySelectorAll('a[href]')) as HTMLAnchorElement[];
 
     for (const a of anchors) {
-      const href = a.href;
+      const rawHref = a.getAttribute('href') ?? '';  // Use getAttribute for raw value
       const text = (a.textContent ?? '').replace(/\s+/g, ' ').trim();
 
-      if (!href || !text) continue;
-      if (seen.has(href)) continue;
-      if (SKIP_PATTERNS.some(p => p.test(href) || p.test(text))) continue;
+      if (!rawHref || !text) continue;
 
-      const score = scoreLink(a, text);
+      // FIX 1C: Resolve to absolute URL before any checks
+      const absoluteHref = resolveUrl(rawHref);
+      if (!absoluteHref) continue;
+
+      if (seen.has(absoluteHref)) continue;
+      if (SKIP_PATTERNS.some(p => p.test(rawHref) || p.test(text))) continue;
+
+      const score = scoreLink(a, text, absoluteHref);
       if (score < 0) continue;
 
-      seen.add(href);
+      seen.add(absoluteHref);
       results.push({
         title: text.slice(0, 150),
-        url: href,
+        url: absoluteHref,  // Always absolute now
         description: getNearbyText(a),
         index: results.length,
       });
     }
 
-    // Sort by score (re-score with full context)
     results.sort((a, b) => {
       let sa = 0, sb = 0;
       if (a.url.includes('/jobs/') || a.url.includes('/job/')) sa += 5;
@@ -592,16 +722,53 @@ async function browserExtractResults(
     return { success: true, message: msg, summary: msg };
   }
 
-  // Log what we found
+  // ── Unwrap Bing redirect URLs (bing.com/ck/a) to real destination URLs ──
+  // Bing wraps every result in a tracking redirect. The &u= param holds
+  // the real URL as base64. Decode it so we navigate to the actual article.
+  function unwrapBingUrl(url: string): string {
+    if (!url.includes('bing.com/ck/a')) return url;
+    try {
+      const match = url.match(/[?&]u=a1([A-Za-z0-9+\/=_-]+)/);
+      if (match) {
+        const b64 = match[1].replace(/-/g, '+').replace(/_/g, '/');
+        const decoded = Buffer.from(b64, 'base64').toString('utf-8');
+        if (decoded.startsWith('http')) {
+          console.log(`[browserExtractResults] Unwrapped Bing URL → ${decoded.slice(0, 80)}`);
+          return decoded;
+        }
+      }
+    } catch { /* fall through */ }
+    return url;
+  }
+
+  // Unwrap bing.com/news/topicview → convert to a real search URL
+  function unwrapBingTopicView(url: string): string {
+    if (!url.includes('bing.com/news/topicview')) return url;
+    try {
+      const u = new URL(url);
+      const q = u.searchParams.get('q');
+      if (q) return `https://www.bing.com/search?q=${encodeURIComponent(q)}`;
+    } catch { /* fall through */ }
+    return url;
+  }
+
+  // Apply URL unwrapping + clean up domain-path titles from Bing
+  for (const r of extracted) {
+    r.url = unwrapBingUrl(r.url);
+    r.url = unwrapBingTopicView(r.url);
+    // Bing often uses "scmp.comhttps://..." as link text — replace with description
+    if (/^[\w.-]+\.(com|net|org|io|co)\b/i.test(r.title)) {
+      r.title = r.description.slice(0, 100).trim() || r.title;
+    }
+  }
+
   extracted.forEach((r, i) => {
     console.log(`  [${i}] "${r.title.slice(0, 60)}" → ${r.url.slice(0, 80)}`);
   });
 
-  // Store as JSON so planner/create_file can use it
   const json = JSON.stringify(extracted, null, 2);
   if (variableName) {
     articleStore[variableName] = json;
-    // Also store individual URLs for easy access: results_0_url, results_1_url, etc.
     extracted.forEach((r, i) => {
       articleStore[`${variableName}_${i}_url`]   = r.url;
       articleStore[`${variableName}_${i}_title`] = r.title;
@@ -609,8 +776,6 @@ async function browserExtractResults(
     });
     console.log(`[browserExtractResults] Stored ${extracted.length} results in articleStore["${variableName}"]`);
   }
-
-  // Return a human-readable summary too
   const summary = extracted.map((r, i) =>
     `${i + 1}. ${r.title}\n   ${r.url}`
   ).join('\n\n');
@@ -619,6 +784,76 @@ async function browserExtractResults(
     success: true,
     message: `Extracted ${extracted.length} results from ${pageUrl}`,
     summary,
+  };
+}
+
+// ─── New Capability: browser_wait_for_element ─────────────────────────────────
+//
+// Smarter than "wait N seconds" — waits for a specific element to appear.
+// Essential for SPAs: wait for the real content to render before extracting.
+
+async function browserWaitForElement(
+  selector: string | undefined,
+  timeoutSeconds: number
+): Promise<StepResult> {
+  if (!selector) throw new Error('selector required for browser_wait_for_element');
+
+  const page = await ensurePlaywright();
+
+  try {
+    await page.waitForSelector(selector, {
+      state: 'visible',
+      timeout: timeoutSeconds * 1000,
+    });
+    return { success: true, message: `Element "${selector}" appeared on ${page.url()}` };
+  } catch {
+    throw new Error(
+      `Element "${selector}" did not appear within ${timeoutSeconds}s on ${page.url()}`
+    );
+  }
+}
+
+// ─── New Capability: browser_get_page_state ───────────────────────────────────
+//
+// Lightweight "perception" step. Use after browser_open to verify the real
+// page loaded (not a 404, not a CAPTCHA, not an empty shell).
+// Prevents garbage from entering articleStore.
+
+async function browserGetPageState(): Promise<StepResult> {
+  const page = await ensurePlaywright();
+
+  const state = await page.evaluate(() => {
+    const botSignals    = ['just a moment', 'access denied', 'captcha', 'are you human'];
+    const errorPatterns = ['404', 'not found', 'error', 'page not exist', 'page not found'];
+
+    const title    = document.title.toLowerCase();
+    const isBot    = botSignals.some(s => title.includes(s));
+    const isError  = errorPatterns.some(p => title.includes(p));
+    const bodyText = (document.body.textContent ?? '').trim();
+
+    return {
+      title:      document.title,
+      isBot,
+      isError,
+      hasContent: bodyText.length > 200,
+      forms:      document.querySelectorAll('form').length,
+      links:      document.querySelectorAll('a[href]').length,
+      url:        window.location.href,
+    };
+  });
+
+  // Hard fail on bot or error page — triggers retry/replan
+  if (state.isBot) {
+    throw new BotDetectionError(state.url, `Bot detection active on ${state.url}`);
+  }
+  if (state.isError) {
+    throw new Error(`Error page detected: "${state.title}" on ${state.url}`);
+  }
+
+  return {
+    success: true,
+    message: `Page state OK: "${state.title}" (links: ${state.links}, forms: ${state.forms})`,
+    ...state,
   };
 }
 
@@ -711,10 +946,15 @@ async function runShellCommand(command: string | undefined): Promise<StepResult>
     if (p.test(command)) throw new Error(`Blocked dangerous command: ${command}`);
   }
 
-  const home = os.homedir();
-  const expanded = command.replace(/(^|\s)~(?=[\\/]|$)/g, `$1${home}`);
+  const home = os.homedir().replace(/\\/g, '/');
+  const expanded = process.platform === 'win32'
+    ? command.replace(/(^|\s)~(?=[\\/])/g, (_m, pre) => {
+        const p = home + '/';
+        return pre + (home.includes(' ') ? `"${p}` : p);
+      }).replace(/(\.(?:py|js|sh|bat|ps1))(?=\s|$)/g,
+        home.includes(' ') ? '$1"' : '$1')
+    : command.replace(/(^|\s)~(?=[\\/]|$)/g, `$1${home}/`);
 
-  // Handle "word <path>" on Windows → use "start"
   if (process.platform === 'win32' && /^\s*word\s+/i.test(command)) {
     const filePath = command.replace(/^\s*word\s+/i, '').trim();
     const resolvedPath = resolvePath(filePath);
@@ -738,14 +978,34 @@ async function runShellCommand(command: string | undefined): Promise<StepResult>
     return { success: true, message: `Launched: ${expanded}` };
   }
 
+  const finalCommand = expanded;
+
+
   try {
-    const { stdout, stderr } = await execAsync(expanded, { timeout: 60_000, maxBuffer: 10 * 1024 * 1024 });
+    const { stdout, stderr } = await execAsync(finalCommand, { timeout: 60_000, maxBuffer: 10 * 1024 * 1024 });
+    // Log stdout so Python print() output is visible
+    if (stdout.trim()) console.log(`[Shell] stdout: ${stdout.trim().slice(0, 500)}`);
+    if (stderr.trim()) console.warn(`[Shell] stderr: ${stderr.trim().slice(0, 500)}`);
     return { success: true, stdout: stdout.trim().slice(0, 5000), stderr: stderr.trim().slice(0, 1000) };
   } catch (err: unknown) {
-    const e = err as { stdout?: string; stderr?: string; message: string };
-    if (e.stdout || e.stderr) {
-      return { success: true, stdout: (e.stdout ?? '').trim(), stderr: (e.stderr ?? '').trim(), warning: 'Non-zero exit' };
+    const e = err as { stdout?: string; stderr?: string; message: string; code?: number };
+    const stdoutStr = (e.stdout ?? '').trim();
+    const stderrStr = (e.stderr ?? '').trim();
+
+    // Always log the actual error output
+    if (stdoutStr) console.log(`[Shell] stdout: ${stdoutStr.slice(0, 500)}`);
+    if (stderrStr) console.error(`[Shell] ✗ stderr: ${stderrStr.slice(0, 500)}`);
+
+    // Python/script errors: stderr contains the traceback — surface it as a real failure
+    if (stderrStr && (stderrStr.includes('Traceback') || stderrStr.includes('Error:') || stderrStr.includes('error:'))) {
+      throw new Error(`Script failed:\n${stderrStr.slice(0, 800)}`);
     }
+
+    // Non-zero exit with output but no clear error — warn but don't fail
+    if (stdoutStr || stderrStr) {
+      return { success: true, stdout: stdoutStr, stderr: stderrStr, warning: 'Non-zero exit' };
+    }
+
     throw new Error(`Shell failed: ${e.message.slice(0, 300)}`);
   }
 }
@@ -756,15 +1016,24 @@ async function createFile(filePath: string | undefined, content: string): Promis
   if (!filePath) throw new Error('path is required');
   const p = resolvePath(filePath);
 
-  // Resolve {{variable_name}} templates from articleStore
   let resolvedContent = content;
   const templateVars = content.match(/\{\{([^}]+)\}\}/g);
   if (templateVars) {
     const store = articleStore;
     for (const tpl of templateVars) {
       const key = tpl.slice(2, -2).trim();
-      if (store[key]) {
-        resolvedContent = resolvedContent.replace(tpl, store[key]);
+if (store[key]) {
+        let val = store[key];
+        // Escape for Python string literals: apostrophes/quotes/newlines break Python syntax
+        if ((filePath ?? '').endsWith('.py')) {
+          val = val
+            .replace(/\\/g, '\\\\')
+            .replace(/'/g, "\\'")
+            .replace(/"/g, '\\"')
+            .replace(/\r?\n/g, '\\n')
+            .replace(/\t/g, '\\t');
+        }
+        resolvedContent = resolvedContent.split(tpl).join(val);
         console.log(`[createFile] Resolved {{${key}}} (${store[key].length} chars)`);
       } else {
         console.warn(`[createFile] Template var {{${key}}} not found in articleStore`);
