@@ -4,7 +4,7 @@ import http from 'http';
 import WebSocket, { WebSocketServer } from 'ws';
 import cors from 'cors';
 import { v4 as uuidv4 } from 'uuid';
-
+import { tryAutoFixBeforeRetry } from './utils/autoFix';
 import { planTask , replanFromStep } from './ai/planner';
 import { reviewPlan } from './ai/reviewer';
 import { executeStep, getLivePage } from './executor/stepExecutor';
@@ -168,14 +168,28 @@ async function executeAllSteps(sessionId: string, session: Session): Promise<voi
 
       if (attempt > 0) {
         retryCount++;
-        broadcast({
-          type: 'safety_check',
-          sessionId,
-          stepNumber: step.step_number,
-          message: `Retrying step ${step.step_number} (attempt ${attempt + 1}/${MAX_RETRIES + 1})...`,
-        });
+        const fixApplied = await tryAutoFixBeforeRetry(step, lastError, broadcast);
+         if (fixApplied) {
+          broadcast({
+            type: 'planning',
+            message: `✓ Auto-fix applied (attempt ${attempt + 1}): ${fixApplied}`,
+          });
+        } else {
+          broadcast({
+            type: 'safety_check',
+            sessionId,
+            stepNumber: step.step_number,
+            message: `Retrying step ${step.step_number} (attempt ${attempt + 1}/${MAX_RETRIES + 1}) — no auto-fix found...`,
+          });}
         await sleep(1500 * attempt);
       }
+
+      if (attempt > 0 && step.capability === 'run_shell_command') {
+    const autoFix = await tryAutoFixBeforeRetry(step, lastError, session);
+    if (autoFix) {
+      broadcast({ type: 'planning', message: `Auto-fix applied: ${autoFix}` });
+    }
+  }
 
       const stepStartTime = Date.now();
 
@@ -339,6 +353,7 @@ if (!succeeded) {
   executionStartTimes.delete(sessionId);
 }
 
+ 
 // ─── Adaptive Workarounds ─────────────────────────────────────────────────────
 
 async function tryAdaptiveWorkaround(
