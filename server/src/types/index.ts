@@ -119,6 +119,7 @@ export interface StepResult {
   warning?: string;
   strategy?: string;       // Which tier/selector won (for logging)
   error?: string;
+  path ?: string;          // For screenshots or files
 }
 
 
