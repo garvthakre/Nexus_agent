@@ -57,7 +57,21 @@ VSCode + file     → create_file then run_shell_command "code ~/Desktop/<file>"
 Notepad + text    → create_file then run_shell_command "notepad ~/Desktop/<file>"
 Calculator        → open_application "Calculator"
 Steam / Zoom / Teams / Slack → open_application "<AppName>"
+"Wallpaper (local file) → set_wallpaper { query: "<exact file path from user>" }
+  ALWAYS use set_wallpaper for ANY wallpaper request — even with local paths like
+  "D:\\Downloads\\image.jpg" or "C:\\Users\\...\\photo.png".
+  NEVER use run_shell_command or registry edits for wallpaper changes.
+  The set_wallpaper capability handles both local files AND search queries.
 
+  CORRECT for local file:
+    set_wallpaper { query: "D:\\Downloads\\images (3).jpeg" }
+
+  CORRECT for search query:
+    set_wallpaper { query: "cyberpunk city neon night 4k" }
+
+  WRONG — never do this for wallpaper:
+    run_shell_command { command: "reg add ... /v Wallpaper ..." }   ← BANNED
+    run_shell_command { command: "RUNDLL32.EXE user32.dll,..." }   ← BANNED"
 ═══════════════════════════════════════════════
 SEARCH ENGINE RULES — CRITICAL
 ═══════════════════════════════════════════════
@@ -218,7 +232,8 @@ PATH RULES
 - Word documents: use create_file (.txt or .md) then run_shell_command "notepad"
   Do NOT use "word <path>" — not a valid CLI command
 - Excel documents: NEVER use create_file for .xlsx — use Python openpyxl script
-
+- run_shell_command with "node" or "python": ALWAYS use ~/Desktop/<file> path
+  NEVER use bare filenames like "node app.js" — always "node ~/Desktop/app.js"
 ═══════════════════════════════════════════════
 CAPABILITY CATALOG
 ═══════════════════════════════════════════════
