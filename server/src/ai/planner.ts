@@ -2,7 +2,7 @@ import OpenAI from 'openai';
 import Anthropic from '@anthropic-ai/sdk';
 import { Plan, Capability } from '../types';
 import { selectExamples, formatExamplesForPrompt } from './promptExamples';
-
+import type {  PlanStep } from '../types/index';
 // ─── Static System Prompt ─────────────────────────────────────────────────────
 
 const STATIC_SYSTEM_PROMPT = `You are a JSON compiler. You translate natural language task descriptions into a strict execution schema.
@@ -491,5 +491,67 @@ export async function planTask(userPrompt: string): Promise<Plan> {
   } catch (err) {
     const preview = raw!.substring(0, 400);
     throw new Error(`Failed to parse AI response: ${(err as Error).message}\n\nRaw output:\n${preview}`);
+  }
+}
+export async function replanFromStep(
+  originalSummary:  string,
+  completedSteps:   Array<{ description: string; capability: string }>,
+  failedStep:       PlanStep,
+  errorMessage:     string,
+  currentPageUrl:   string,
+  currentPageTitle: string,
+  remainingGoal:    string,
+): Promise<Plan | null> {
+
+  // Build a clear, context-rich prompt for the replanner.
+  // The AI sees exactly where execution stopped and what the goal still is.
+  const prompt = [
+    `ORIGINAL GOAL: ${originalSummary}`,
+    '',
+    `COMPLETED SO FAR (${completedSteps.length} step${completedSteps.length !== 1 ? 's' : ''}):`,
+    ...completedSteps.map((s, i) => `  ${i + 1}. [${s.capability}] ${s.description} — DONE`),
+    '',
+    `FAILED STEP: "${failedStep.description}"`,
+    `CAPABILITY:  ${failedStep.capability}`,
+    `ERROR:       ${errorMessage}`,
+    '',
+    `CURRENT BROWSER STATE:`,
+    `  Page title: "${currentPageTitle}"`,
+    `  Page URL:   ${currentPageUrl}`,
+    '',
+    `REMAINING GOAL: ${remainingGoal}`,
+    '',
+    `Generate a NEW plan starting from the CURRENT PAGE (above) to achieve the remaining goal.`,
+    `- Number your steps starting from 1`,
+    `- Do NOT repeat the already-completed steps`,
+    `- Do NOT attempt to redo the failed step the same way — find an alternative approach`,
+    `- Only use capabilities that are available`,
+    `- If the remaining goal is already achieved based on the current page, return a single`,
+    `  "browser_read_page" step to confirm it`,
+  ].join('\n');
+
+  console.log(
+    `[Replanner] Generating new plan after "${failedStep.description}" failed.\n` +
+    `  Current page: "${currentPageTitle}" at ${currentPageUrl}\n` +
+    `  Completed: ${completedSteps.length} steps | Remaining goal: "${remainingGoal.slice(0, 80)}"`
+  );
+
+  try {
+    const newPlan = await planTask(prompt);
+
+    if (!newPlan || !newPlan.steps || newPlan.steps.length === 0) {
+      console.warn('[Replanner] AI returned an empty plan — will not replan');
+      return null;
+    }
+
+    console.log(`[Replanner] ✓ New plan generated with ${newPlan.steps.length} step(s):`);
+    newPlan.steps.forEach((s, i) =>
+      console.log(`  ${i + 1}. [${s.capability}] ${s.description}`)
+    );
+
+    return newPlan;
+  } catch (e) {
+    console.warn('[Replanner] planTask() threw during replanning:', (e as Error).message);
+    return null;
   }
 }
