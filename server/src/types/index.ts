@@ -1,138 +1,147 @@
+/**
+ *  
+ *
+ *
+ *  
+ *   + browser_screenshot_analyze  (NEW — Vision fallback capability)
+ *
+ * Already present from Week 2:
+ *   + browser_wait_for_element
+ *   + browser_get_page_state
+ */
+
+// ─── Capability Union ─────────────────────────────────────────────────────────
+// This is the exhaustive list of all capabilities the planner can emit.
+// Add new capabilities here AND in:
+//   1. stepExecutor.ts executeStep() switch
+//   2. planner.ts VALID_CAPABILITIES set
+//   3. planner.ts STATIC_SYSTEM_PROMPT capability catalog
+
 export type Capability =
-  | 'browser_navigate'
+  // Browser automation
+  | 'browser_open'
   | 'browser_click'
   | 'browser_fill'
   | 'browser_read_page'
   | 'browser_extract_results'
-  | 'browser_scroll'
-  | 'browser_screenshot'
-  | 'browser_wait_for_element'   // ← NEW (Week 2 Task 7)
-  | 'browser_get_page_state'     // ← NEW (Week 2 Task 7)
+  | 'browser_wait_for_element'      
+  | 'browser_get_page_state'       
+  | 'browser_screenshot_analyze'     
+
+  // App automation
   | 'open_application'
-  | 'close_application'
-  | 'send_keys'
-  | 'get_clipboard'
-  | 'set_clipboard'
-  | 'run_script';
+  | 'app_find_window'
+  | 'app_focus_window'
+  | 'app_click'
+  | 'app_type'
+  | 'app_screenshot'
+  | 'app_verify'
+
+  // System
+  | 'type_text'
+  | 'run_shell_command'
+  | 'set_wallpaper'
+
+  // Files
+  | 'create_file'
+  | 'create_folder'
+  | 'download_file'
+
+  // Utility
+  | 'wait';
+
+
+// ─── Step Parameters ──────────────────────────────────────────────────────────
+
+export interface StepParameters {
+  // browser_open
+  url?: string;
+
+  // browser_click / browser_fill / browser_wait_for_element
+  selector?: string;
+  value?: string;
+  seconds?: number;
+
+  // browser_read_page / browser_extract_results
+  variable_name?: string;
+  topic?: string;
+  count?: number;
+
+  // browser_screenshot_analyze  (Week 3)
+  target_description?: string;
+  action?: 'click' | 'fill';
+
+  // open_application / app_*
+  app_name?: string;
+  element_name?: string;
+  text?: string;
+
+  // create_file / create_folder / download_file
+  path?: string;
+  destination?: string;
+  content?: string;
+
+  // run_shell_command
+  command?: string;
+
+  // set_wallpaper
+  query?: string;
+}
+
+
+// ─── Plan Step ────────────────────────────────────────────────────────────────
+
+export interface PlanStep {
+  capability: Capability;
+  parameters: StepParameters;
+  description: string;
+}
+
 
 // ─── Plan ─────────────────────────────────────────────────────────────────────
 
-export interface PlanStep {
-  step_number:    number;
-  capability:     Capability;
-  description:    string;
-  parameters:     Record<string, unknown>;
-  optional?:      boolean;
-  wait_after_ms?: number;
+export interface Plan {
+  steps: PlanStep[];
+  reasoning?: string;
 }
 
-export interface Plan {
-  summary:    string;
-  steps:      PlanStep[];
-  created_at: string;
-}
 
 // ─── Step Result ──────────────────────────────────────────────────────────────
 
-export type ChangeType = 'url' | 'content' | 'none';
-
 export interface StepResult {
-  stepNumber: number;
-  success:    boolean;
-  output?:    unknown;
-  error?:     string;
-  strategy?:  string;   // which tier/selector worked (from Browserengine)
-  tier?:      number;   // -1=memory, 0-4=tiers
-
-  // ── NEW fields (Week 2 Task 7) ────────────────────────────────────────────
-  navigated?:   boolean;      // true if this step caused a page navigation
-  changeType?:  ChangeType;   // what kind of change was detected after click
-  electron?:    boolean;      // true if step was executed via Electron CDP
-  cdp_port?:    number;       // CDP port used for Electron steps
+  success: boolean;
+  message?: string;
+  url?: string;
+  title?: string;
+  content?: string;
+  results?: unknown[];
+  navigated?: boolean;
+  warning?: string;
+  strategy?: string;       // Which tier/selector won (for logging)
+  error?: string;
 }
 
-// ─── Execution Log (mirrors server ExecutionLog) ───────────────────────────
 
-export interface StepLog {
-  stepNumber:    number;
-  capability:    Capability;
-  description:   string;
-  success:       boolean;
-  strategy?:     string;
-  errorMessage?: string;
-  durationMs:    number;
-  retryCount:    number;
-  pageUrl?:      string;
-}
+// ─── Execution Log Entry ──────────────────────────────────────────────────────
 
-export interface ExecutionLog {
-  timestamp:      string;
-  sessionId:      string;
-  prompt:         string;
-  intent:         string;
-  provider:       string;
-  totalSteps:     number;
-  steps:          StepLog[];
+export interface ExecutionLogEntry {
+  sessionId:     string;
+  taskPrompt:    string;
+  timestamp:     string;
+  totalSteps:    number;
+  failedSteps:   number;
   overallSuccess: boolean;
-  successRate:    number;
-  durationMs:     number;
-}
-
-// ─── WebSocket Broadcast Message Types ───────────────────────────────────────
-//
-// These mirror the `type` field used in broadcast() calls in server.ts.
-// The union lets the frontend switch on event.type with full type safety.
-
-export type BroadcastEvent =
-  | { type: 'planning';    message: string }
-  | { type: 'plan_ready';  sessionId: string; plan: Plan }
-  | { type: 'step_start';  sessionId: string; stepNumber: number; description: string }
-  | { type: 'step_done';   sessionId: string; stepNumber: number; result: StepResult }
-  | { type: 'step_error';  sessionId: string; stepNumber: number; error: string }
-  | { type: 'task_done';   sessionId: string; results: StepResult[]; summary: string }
-  | { type: 'task_error';  sessionId: string; error: string }
-  // ── NEW (Week 2 re-planning) ────────────────────────────────────────────
-  | { type: 'replanning';  sessionId: string; fromStep: number; reason: string }
-  | { type: 'replan_done'; sessionId: string; newStepCount: number };
-
-// ─── Session / API Types ──────────────────────────────────────────────────────
-
-export interface SessionState {
-  sessionId:   string;
-  status:      'idle' | 'planning' | 'executing' | 'done' | 'error';
-  plan?:       Plan;
-  results:     StepResult[];
-  startedAt?:  string;
-  finishedAt?: string;
-}
-
-export interface ApiRunRequest {
-  prompt:    string;
-  sessionId?: string;
-  provider?: 'claude' | 'openai' | 'groq';
-}
-
-export interface ApiRunResponse {
-  sessionId: string;
-  plan:      Plan;
-}
-
-// ─── Selector Memory Stats (for /api/logs response) ───────────────────────
-
-export interface SelectorMemoryStats {
-  totalDomains:   number;
-  totalHints:     number;
-  totalSelectors: number;
-  topDomains:     Array<{ domain: string; hints: number }>;
-}
-
-// ─── Health Check ─────────────────────────────────────────────────────────────
-
-export interface HealthResponse {
-  status:        'ok' | 'degraded';
-  uptime:        number;
-  version:       string;
-  memoryStats?:  SelectorMemoryStats;
-  successRate?:  number;
-  totalRuns?:    number;
+  successRate:   number;
+  durationMs:    number;
+  steps: Array<{
+    stepIndex:    number;
+    capability:   Capability;
+    description:  string;
+    success:      boolean;
+    strategy?:    string;
+    errorMessage?: string;
+    durationMs:   number;
+    retryCount:   number;
+    pageUrl?:     string;
+  }>;
 }
