@@ -197,44 +197,97 @@ async function executeAllSteps(sessionId: string, session: Session): Promise<voi
         console.warn(`[Executor] Step ${step.step_number} attempt ${attempt + 1} failed:`, lastError);
       }
     }
+if (!succeeded) {
+        broadcast({
+          type: "step_error",
+          sessionId,
+          stepNumber: step.step_number,
+          error: lastError,
+        });
+        results.push({ stepNumber: step.step_number, success: false, error: lastError });
+        totalFailed++;
 
-    if (!succeeded) {
-      broadcast({
-        type: 'step_error',
-        sessionId,
-        stepNumber: step.step_number,
-        error: lastError,
-      });
+        // ── Week 2: Mid-Execution Re-Planning ──────────────────────────────────
+        // If this isn't the last step, try to generate a fresh plan from the
+        // current browser position instead of abandoning the whole task.
+        const isLastStep = i >= plan.steps.length - 1;
 
-      results.push({ stepNumber: step.step_number, success: false, error: lastError });
-      totalFailed++;
+        if (!isLastStep) {
+          const livePage = getLivePage();
 
-      // ── Adaptive fallback ─────────────────────────────────────────────────
-      const isCritical = step.safety_risk === 'high' || i === 0;
+          if (livePage) {
+            try {
+              const pageUrl   = livePage.url();
+              const pageTitle = await livePage.title().catch(() => "");
 
-      if (isCritical && totalFailed === 1) {
-        const workaround = await tryAdaptiveWorkaround(step, lastError, sessionId);
-        if (workaround) {
-          results[results.length - 1] = {
-            stepNumber: step.step_number,
-            success:    true,
-            result:     workaround,
-          };
-          broadcast({ type: 'step_complete', sessionId, stepNumber: step.step_number, result: workaround, duration: 0 });
-          totalFailed--;
-          continue;
+              // Build context: what's done, what failed, what's still needed
+              const completedSteps = plan.steps.slice(0, i).map(s => ({
+                description: s.description,
+                capability:  s.capability,
+              }));
+
+              const remainingGoal = plan.steps
+                .slice(i + 1)
+                .map(s => s.description)
+                .join("; ");
+
+              broadcast({
+                type:    "planning",
+                message: `Step ${step.step_number} failed — re-planning from current page...`,
+              });
+
+              console.log(
+                `[Server] Attempting mid-execution replan after step ${step.step_number} failed.`
+              );
+
+              const newPlan = await replanFromStep(
+                plan.summary,
+                completedSteps,
+                step,
+                lastError,
+                pageUrl,
+                pageTitle,
+                remainingGoal,
+              );
+
+              if (newPlan && newPlan.steps.length > 0) {
+                // Renumber the new steps to continue from where we are
+                const numberedNewSteps = newPlan.steps.map((s, idx) => ({
+                  ...s,
+                  step_number: step.step_number + idx + 1,
+                }));
+
+                // Splice: remove all remaining steps, insert the new plan
+                plan.steps.splice(
+                  i + 1,
+                  plan.steps.length - (i + 1),
+                  ...numberedNewSteps,
+                );
+
+                broadcast({ type: "plan_ready", sessionId, plan });
+                broadcast({
+                  type:    "planning",
+                  message: `Re-planned: ${newPlan.steps.length} new step${newPlan.steps.length !== 1 ? "s" : ""} generated`,
+                });
+
+                console.log(
+                  `[Server] Re-plan successful — inserted ${newPlan.steps.length} new steps. ` +
+                  `Execution continues.`
+                );
+              } else {
+                console.warn("[Server] Re-plan returned no steps — continuing with original remaining steps");
+              }
+            } catch (replanErr) {
+              console.warn("[Server] Re-planning threw an error:", (replanErr as Error).message);
+              // Non-fatal: just continue with remaining original steps
+            }
+          } else {
+            console.warn("[Server] getLivePage() returned null — cannot replan (no live browser context)");
+          }
         }
+
+        await sleep(500);
       }
-
-      broadcast({
-        type: 'safety_check',
-        sessionId,
-        stepNumber: step.step_number,
-        message: `⚠ Step ${step.step_number} skipped after ${MAX_RETRIES + 1} attempts — continuing...`,
-      });
-
-      await sleep(500);
-    }
 
     await sleep(300);
   }
