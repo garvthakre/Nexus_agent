@@ -1096,32 +1096,98 @@ async function typeText(text: string | undefined): Promise<StepResult> {
 
 async function setWallpaper(query: string | undefined): Promise<StepResult> {
   if (!query) throw new Error('query is required');
-  const wallpaperPath = path.join(os.tmpdir(), `nexus-wallpaper-${Date.now()}.jpg`);
-  const provider = await fetchWallpaperImage(query, wallpaperPath);
+
+  let wallpaperPath: string;
+  let provider: string;
+
+  // Detect local file path vs search query
+  const isLocalPath =
+    /^[A-Za-z]:[\\\/]/.test(query) ||
+    query.startsWith('\\\\') ||
+    query.startsWith('/');
+
+  if (isLocalPath) {
+    // Collapse double-backslashes introduced by JSON escaping (D:\\\\ → D:\)
+    wallpaperPath = query
+      .replace(/\\\\/g, '\\')
+      .replace(/\\\\/g, '\\')
+      .replace(/\//g, '\\');
+    provider = 'local file';
+    try {
+      await fs.access(wallpaperPath);
+    } catch {
+      throw new Error(`Wallpaper file not found: "${wallpaperPath}". Raw query was: "${query}"`);
+    }
+  } else {
+    wallpaperPath = path.join(os.tmpdir(), `nexus-wallpaper-${Date.now()}.jpg`);
+    provider = await fetchWallpaperImage(query, wallpaperPath);
+  }
+
   const platform = process.platform;
 
   try {
     if (platform === 'win32') {
       const scriptPath = path.join(os.tmpdir(), `set-wp-${Date.now()}.ps1`);
-      const wp = wallpaperPath.replace(/\\/g, '\\\\');
-      const script = `Add-Type -TypeDefinition @"\nusing System; using System.Runtime.InteropServices;\npublic class WP {\n  [DllImport("user32.dll", CharSet=CharSet.Auto)]\n  public static extern int SystemParametersInfo(int uAction,int uParam,string lpvParam,int fuWinIni);\n}\n"@\n[WP]::SystemParametersInfo(20, 0, "${wp}", 3)`;
-      await fs.writeFile(scriptPath, script, 'utf-8');
-      try { await execAsync(`powershell -ExecutionPolicy Bypass -File "${scriptPath}"`, { timeout: 15000 }); }
-      finally { await fs.unlink(scriptPath).catch(() => {}); }
+
+      // Use array join instead of template literal to avoid backtick conflicts
+      const scriptLines = [
+        'param([string]$WallpaperPath)',
+        'Add-Type -TypeDefinition @"',
+        'using System;',
+        'using System.Runtime.InteropServices;',
+        'public class WPSetter {',
+        '    [DllImport("user32.dll", CharSet=CharSet.Unicode, SetLastError=true)]',
+        '    public static extern bool SystemParametersInfo(uint uAction, uint uParam, string lpvParam, uint fuWinIni);',
+        '}',
+        '"@',
+        '[WPSetter]::SystemParametersInfo(0x0014, 0, $WallpaperPath, 0x0001 -bor 0x0002) | Out-Null',
+        "Set-ItemProperty -Path 'HKCU:\\Control Panel\\Desktop' -Name Wallpaper      -Value $WallpaperPath",
+        "Set-ItemProperty -Path 'HKCU:\\Control Panel\\Desktop' -Name WallpaperStyle -Value '10'",
+        "Set-ItemProperty -Path 'HKCU:\\Control Panel\\Desktop' -Name TileWallpaper  -Value '0'",
+        'Stop-Process -Name explorer -Force -ErrorAction SilentlyContinue',
+        'Start-Sleep -Seconds 2',
+        'Start-Process explorer.exe',
+      ];
+
+      await fs.writeFile(scriptPath, scriptLines.join('\n'), 'utf-8');
+      try {
+        // Pass path as argument — avoids all escaping issues inside the script body
+        await execAsync(
+          `powershell -ExecutionPolicy Bypass -File "${scriptPath}" -WallpaperPath "${wallpaperPath}"`,
+          { timeout: 20_000 }
+        );
+      } finally {
+        await fs.unlink(scriptPath).catch(() => {});
+      }
+
     } else if (platform === 'darwin') {
-      await execAsync(`osascript -e 'tell application "Finder" to set desktop picture to POSIX file "${wallpaperPath}"'`, { timeout: 15000 });
+      await execAsync(
+        `osascript -e 'tell application "Finder" to set desktop picture to POSIX file "${wallpaperPath}"'`,
+        { timeout: 15_000 }
+      );
     } else {
       for (const cmd of [
         `gsettings set org.gnome.desktop.background picture-uri "file://${wallpaperPath}"`,
+        `gsettings set org.gnome.desktop.background picture-uri-dark "file://${wallpaperPath}"`,
         `pcmanfm --set-wallpaper "${wallpaperPath}"`,
         `feh --bg-fill "${wallpaperPath}"`,
       ]) {
-        try { await execAsync(cmd, { timeout: 8000 }); break; } catch { /* next */ }
+        try { await execAsync(cmd, { timeout: 8_000 }); break; } catch { /* try next */ }
       }
     }
-    return { success: true, message: `✓ Wallpaper set (source: ${provider})`, path: wallpaperPath };
+
+    return {
+      success: true,
+      message: `✓ Wallpaper set (source: ${provider})`,
+      path: wallpaperPath,
+    };
   } catch (err) {
-    return { success: true, message: `Downloaded but auto-set failed`, path: wallpaperPath, warning: (err as Error).message };
+    return {
+      success: true,
+      message: `Wallpaper written but refresh may be needed`,
+      path: wallpaperPath,
+      warning: (err as Error).message,
+    };
   }
 }
 
