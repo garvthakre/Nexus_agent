@@ -313,6 +313,7 @@ export async function executeStep(step: PlanStep): Promise<StepResult> {
     case 'app_type':               return appTypeStep(parameters.app_name, parameters.element_name, parameters.text);
     case 'app_screenshot':         return appScreenshotStep(parameters.app_name);
     case 'app_verify':             return appVerifyStep(parameters.app_name, parameters.text);
+    case 'browser_screenshot':         return browserTakeScreenshot(parameters.path);
     default: throw new Error(`Unknown capability: ${capability}`);
   }
 }
@@ -590,7 +591,9 @@ async function browserReadPage(
   } catch (e) {
     console.warn('[browserReadPage] Groq summarization failed:', (e as Error).message);
     summary = rawText.slice(0, 500).trim() + '...';
+    groqFailed = true;
   }
+  
 
   const result = `Title: ${title}\nURL: ${url}\n\n${summary}`;
   if (variableName) {
@@ -598,7 +601,12 @@ async function browserReadPage(
     console.log(`[browserReadPage] Stored "${variableName}": ${result.length} chars`);
   }
 
-  return { success: true, message: `Summarized: "${title}"`, summary: result };
+ return {
+    success: true,
+    message: `Summarized: "${title}"`,
+    summary: result,
+    ...(groqFailed ? { warning: 'Groq summarization unavailable — raw text used as fallback' } : {}),
+  };
 }
 
 // ─── FIX 1C: browserExtractResults — resolve relative URLs ───────────────────
@@ -723,9 +731,13 @@ async function browserExtractResults(
   console.log(`[browserExtractResults] Found ${extracted.length} results on ${pageUrl}`);
 
   if (extracted.length === 0) {
-    const msg = `No results found on ${pageUrl}`;
-    if (variableName) articleStore[variableName] = JSON.stringify([]);
-    return { success: true, message: msg, summary: msg };
+    // This is a real failure — downstream steps that depend on {{results_0_url}}
+    // will silently use unresolved templates and produce garbage output.
+    throw new Error(
+      `browser_extract_results: No results found on ${pageUrl}. ` +
+      `The page may not have loaded fully, or the search returned no results. ` +
+      `Try adding a browser_wait_for_element step before extracting.`
+    );
   }
 
   // ── Unwrap Bing redirect URLs (bing.com/ck/a) to real destination URLs ──
@@ -1007,9 +1019,12 @@ async function runShellCommand(command: string | undefined): Promise<StepResult>
       throw new Error(`Script failed:\n${stderrStr.slice(0, 800)}`);
     }
 
-    // Non-zero exit with output but no clear error — warn but don't fail
-    if (stdoutStr || stderrStr) {
-      return { success: true, stdout: stdoutStr, stderr: stderrStr, warning: 'Non-zero exit' };
+if (stderrStr) {
+      throw new Error(`Command failed (exit ${e.code ?? '?'}):\n${stderrStr.slice(0, 800)}`);
+    }
+    // stdout only with non-zero exit — warn but don't fail (some tools do this)
+    if (stdoutStr) {
+      return { success: true, stdout: stdoutStr, warning: `Non-zero exit code ${e.code}` };
     }
 
     throw new Error(`Shell failed: ${e.message.slice(0, 300)}`);
@@ -1050,6 +1065,14 @@ if (store[key]) {
   await fs.mkdir(path.dirname(p), { recursive: true });
   await fs.writeFile(p, resolvedContent, 'utf-8');
   const stat = await fs.stat(p);
+    const isPythonOrScript = p.endsWith('.py') || p.endsWith('.js') || p.endsWith('.sh');
+  if (isPythonOrScript && stat.size < 50) {
+    throw new Error(
+      `createFile: Script "${p}" is only ${stat.size} bytes — ` +
+      `template variables were likely not resolved. ` +
+      `Check that browser_read_page/browser_extract_results ran before this step.`
+    );
+  }
   return { success: true, path: p, message: `Created ${p} (${stat.size}B)` };
 }
 
@@ -1359,5 +1382,86 @@ async function browserScreenshotAnalyze(
     success: true,
     message: `Vision fallback succeeded: "${selectorToTry}"`,
     strategy: geminiSelector ? `vision:${selectorToTry}` : `vision-fallback:${selectorToTry}`,
+  };
+}
+
+async function browserTakeScreenshot(savePath?: string): Promise<StepResult> {
+  // ── Step 1: Get live page ───────────────────────────────────────────────────
+  const page = await ensurePlaywright();
+
+  if (!await isPageAlive(page)) {
+    throw new Error('browser_screenshot: No live browser page — open a URL first');
+  }
+
+  // ── Step 2: Resolve destination path ────────────────────────────────────────
+  //
+  // resolvePath() already handles ~, /Users/..., /home/... → converts to
+  // absolute path using os.homedir(). Falls back to Desktop if no path given.
+
+  const dest = savePath
+    ? resolvePath(savePath)
+    : path.join(os.homedir(), 'Desktop', `nexus-screenshot-${Date.now()}.png`);
+
+  console.log(`[browser_screenshot] Saving to: ${dest}`);
+
+  // ── Step 3: Ensure directory exists ─────────────────────────────────────────
+  try {
+    await fs.mkdir(path.dirname(dest), { recursive: true });
+  } catch (mkdirErr) {
+    throw new Error(
+      `browser_screenshot: Cannot create directory "${path.dirname(dest)}": ${(mkdirErr as Error).message}`
+    );
+  }
+
+  // ── Step 4: Take the screenshot ─────────────────────────────────────────────
+  //
+  // Playwright's page.screenshot() throws on failure — we let it propagate
+  // so the retry loop in executeAllSteps() catches it and retries the step.
+
+  try {
+    await page.screenshot({
+      path: dest,
+      fullPage: false,   // viewport only — faster, smaller file
+      type: 'png',
+    });
+  } catch (screenshotErr) {
+    throw new Error(
+      `browser_screenshot: Playwright screenshot failed — ${(screenshotErr as Error).message}`
+    );
+  }
+
+  // ── Step 5: Verify the file was actually written ────────────────────────────
+  //
+  // This is the KEY fix. Without this check, Playwright can silently fail to
+  // write (permissions, path too long on Windows, disk full) and the old code
+  // would still return success:true.
+
+  let fileStat: import('fs').Stats;
+  try {
+    fileStat = await fs.stat(dest);
+  } catch {
+    throw new Error(
+      `browser_screenshot: Screenshot command ran but file was NOT created at "${dest}". ` +
+      `Check write permissions and that the path is valid.`
+    );
+  }
+
+  if (fileStat.size < 1000) {
+    // A valid PNG is always > 1KB. A 0-byte or tiny file means something went wrong.
+    await fs.unlink(dest).catch(() => {}); // clean up the broken file
+    throw new Error(
+      `browser_screenshot: File was created but appears corrupt (${fileStat.size} bytes). ` +
+      `Expected a valid PNG > 1KB.`
+    );
+  }
+
+  // ── Step 6: Return success with verified path ────────────────────────────────
+  const sizeKB = Math.round(fileStat.size / 1024);
+  console.log(`[browser_screenshot] ✓ Screenshot saved: ${dest} (${sizeKB}KB)`);
+
+  return {
+    success: true,
+    path: dest,
+    message: `Screenshot saved to ${dest} (${sizeKB}KB)`,
   };
 }
