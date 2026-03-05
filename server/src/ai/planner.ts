@@ -310,6 +310,69 @@ DO NOT add wait steps unless the site requires it (SPAs above).
 DO NOT use browser_click to submit search — use browser_fill + Enter key instead.
 
 ═══════════════════════════════════════════════
+PYTHON SCRIPT RULES — ALWAYS SELF-INSTALLING
+═══════════════════════════════════════════════
+
+⚠ EVERY Python script must be self-healing. Never assume packages are installed.
+  Never assume file encoding. Never assume directories exist.
+
+REQUIRED TEMPLATE — copy this header into every Python script you generate:
+
+import subprocess, sys, os
+
+# ── Auto-install missing packages ──────────────────────────────
+def _ensure(pkg, import_name=None):
+    try:
+        __import__(import_name or pkg)
+    except ImportError:
+        subprocess.check_call([sys.executable, "-m", "pip", "install", pkg, "--quiet"],
+                              stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+# Example — list every package your script needs:
+_ensure("requests")
+_ensure("beautifulsoup4", "bs4")
+_ensure("openpyxl")
+
+import requests  # now safe to import
+
+# ── Always use utf-8 for ALL file operations ─────────────────
+# WRONG:  open('file.txt', 'w')
+# CORRECT: open('file.txt', 'w', encoding='utf-8')
+
+# ── Always create parent directories ────────────────────────
+output_path = os.path.expanduser('~/Desktop/output.txt')
+os.makedirs(os.path.dirname(output_path), exist_ok=True)
+
+with open(output_path, 'w', encoding='utf-8') as f:
+    f.write("result")
+
+# ── Always use errors='replace' for web content ─────────────
+# response.text can contain Unicode that cp1252 can't handle on Windows
+with open(output_path, 'w', encoding='utf-8', errors='replace') as f:
+    f.write(response.text)
+
+RULES SUMMARY:
+  1. ALWAYS call _ensure() for every non-stdlib import before importing it
+  2. ALWAYS add encoding='utf-8' to every open() call
+  3. ALWAYS add os.makedirs(..., exist_ok=True) before writing to a path
+  4. ALWAYS use os.path.expanduser() for paths with ~ 
+  5. ALWAYS add errors='replace' when writing web/API response text to files
+  6. NEVER write bare "import requests" without the _ensure() guard above it
+
+WRONG — will fail on first run or on Windows:
+  import requests                           ← no install guard
+  with open('report.txt', 'w') as f:        ← no encoding
+  f.write(response.text)                    ← UnicodeEncodeError on Windows
+
+CORRECT:
+  _ensure("requests")
+  import requests
+  response = requests.get(url, timeout=15)
+  os.makedirs(os.path.dirname(out), exist_ok=True)
+  with open(out, 'w', encoding='utf-8', errors='replace') as f:
+      f.write(response.text)
+
+═══════════════════════════════════════════════
 OUTPUT SCHEMA
 ═══════════════════════════════════════════════
 
@@ -404,7 +467,7 @@ async function planWithOpenAI(userPrompt: string): Promise<string> {
 const VALID_CAPABILITIES: Capability[] = [
   'open_application', 'set_wallpaper', 'run_shell_command',
   'browser_open', 'browser_fill', 'browser_click', 'browser_read_page', 'browser_extract_results',
-  'browser_wait_for_element', 'browser_get_page_state',
+  'browser_wait_for_element', 'browser_get_page_state','browser_screenshot',
   'type_text', 'create_file', 'create_folder', 'wait', 'download_file',
   'app_find_window', 'app_focus_window', 'app_click', 'app_type',
 ];
@@ -536,6 +599,9 @@ export async function replanFromStep(
     '',
     `REMAINING GOAL: ${remainingGoal}`,
     '',
+     `ERROR ANALYSIS:`,
+  ...analyzeError(errorMessage),
+  '',
     `Generate a NEW plan starting from the CURRENT PAGE (above) to achieve the remaining goal.`,
     `- Number your steps starting from 1`,
     `- Do NOT repeat the already-completed steps`,
@@ -569,4 +635,49 @@ export async function replanFromStep(
     console.warn('[Replanner] planTask() threw during replanning:', (e as Error).message);
     return null;
   }
+}
+
+function analyzeError(errorMessage: string): string[] {
+  const hints: string[] = [];
+
+  // Python missing module
+  const missingModule = errorMessage.match(/ModuleNotFoundError: No module named '([^']+)'/);
+  if (missingModule) {
+    hints.push(`  - Python module "${missingModule[1]}" is not installed.`);
+    hints.push(`  - Fix: add a run_shell_command step BEFORE the script: "pip install ${missingModule[1]}"`);
+    hints.push(`  - Then retry the original script command.`);
+    return hints;
+  }
+
+  // Node missing module
+  const nodeModule = errorMessage.match(/Cannot find module '([^']+)'/);
+  if (nodeModule) {
+    hints.push(`  - Node module "${nodeModule[1]}" is not installed.`);
+    hints.push(`  - Fix: add a run_shell_command step BEFORE the script: "npm install ${nodeModule[1]}"`);
+    return hints;
+  }
+
+  // Permission denied
+  if (errorMessage.includes('Permission denied') || errorMessage.includes('EACCES')) {
+    hints.push(`  - Permission denied. The file or directory is not writable.`);
+    hints.push(`  - Fix: try a different path, or check file permissions.`);
+    return hints;
+  }
+
+  // File not found
+  if (errorMessage.includes('No such file') || errorMessage.includes('ENOENT')) {
+    hints.push(`  - A required file was not found.`);
+    hints.push(`  - Fix: verify the file path is correct and the create_file step ran successfully.`);
+    return hints;
+  }
+
+  // Command not found
+  if (errorMessage.includes('not recognized') || errorMessage.includes('command not found')) {
+    hints.push(`  - The command was not found on this system.`);
+    hints.push(`  - Fix: check if the program is installed, or use an alternative command.`);
+    return hints;
+  }
+
+  hints.push(`  - ${errorMessage.slice(0, 200)}`);
+  return hints;
 }
