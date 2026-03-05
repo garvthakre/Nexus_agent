@@ -1,20 +1,21 @@
 /**
- * browserEngine.ts  — NEXUS Smart Browser Engine v5
+ * browserEngine.ts  — NEXUS Smart Browser Engine v6
  * ─────────────────────────────────────────────────────────────────────────────
- * Week 2 changes applied:
+ * Week 3 changes applied:
  *
+ *   TIER 5 — Vision Fallback (Gemini Flash)
+ *     NEW: When all previous tiers fail, take a screenshot of the current page
+ *          and send it to Google Gemini 1.5 Flash (FREE — 1500 req/day).
+ *          Gemini sees the rendered pixels, not the DOM — recovers cases where:
+ *            - Element has no aria-label, placeholder, or accessible name
+ *            - Page uses canvas rendering with no DOM structure
+ *            - Shadow DOM prevents Playwright from seeing the element
+ *            - Heavily obfuscated class names (randomised by bundler)
+ *          Requires GEMINI_API_KEY in .env (free at aistudio.google.com)
+ *          Falls back gracefully if key is missing — just skips to throw.
+ *
+ * Week 2 changes (already present):
  *   MEMORY TIER (Tier -1) — selectorMemory integration
- *     NEW: Before Tier 0, check if we have a remembered selector for this
- *          domain+hint combo. If yes, try it immediately. If it works, we
- *          skip all 5 tiers entirely — task completes in ~200ms instead of
- *          3-5 seconds. If it fails (stale), record the failure and fall
- *          through to Tier 0 as normal.
- *
- *     NEW: After every successful tier, call recordSuccess() so the winning
- *          selector is stored for next time. This makes NEXUS progressively
- *          faster with every task it executes.
- *
- * Week 1 changes (already present):
  *   FIX 2A — Progressive waits between tier escalations
  *   FIX 2B — Groq selector validation in Tier 2/3
  * ─────────────────────────────────────────────────────────────────────────────
@@ -843,6 +844,221 @@ async function tier4UrlFallback(
   }
 }
 
+// ─── Vision Fallback (Gemini Flash) ───────────────────────────────────
+//
+// WEEK 3: Last resort when all DOM-based tiers fail.
+// Takes a screenshot of the current page, sends it to Google Gemini 1.5 Flash
+// (FREE — 1500 req/day at aistudio.google.com) which sees the rendered pixels
+// and returns the CSS selector for the target element.
+//
+// Recovers failures that are impossible for DOM-based tiers:
+//   - Elements with no aria-label, placeholder, or accessible name
+//   - Canvas-rendered UIs with zero DOM structure
+//   - Shadow DOM elements Playwright can't pierce
+//   - Heavily obfuscated/randomised class names
+//
+// Requires GEMINI_API_KEY in .env (free, no credit card needed).
+// Gracefully skips if key is missing — falls through to the final throw.
+
+async function tier5VisionGemini(
+  page: import('playwright').Page,
+  hint: string,
+  action: ElementAction,
+  value?: string,
+): Promise<ActionResult | null> {
+  console.log('[Tier 5] Vision fallback (Gemini Flash) starting...');
+
+  const geminiKey = process.env.GEMINI_API_KEY;
+  if (!geminiKey || geminiKey === 'your_gemini_api_key_here') {
+    console.log('[Tier 5] GEMINI_API_KEY not set — skipping vision fallback.');
+    console.log('[Tier 5] Get a free key at https://aistudio.google.com → Get API Key');
+    return null;
+  }
+
+  // Take a viewport screenshot (not full page — keeps image small and fast)
+  let screenshotBase64: string;
+  try {
+    const buffer = await page.screenshot({ type: 'jpeg', quality: 75, fullPage: false });
+    screenshotBase64 = buffer.toString('base64');
+    console.log(`[Tier 5] Screenshot captured: ${Math.round(screenshotBase64.length / 1024)}KB`);
+  } catch (e) {
+    console.warn('[Tier 5] Screenshot failed:', (e as Error).message);
+    return null;
+  }
+
+  // Build the prompt — ask Gemini for a CSS selector AND a backup text label
+  const actionDescription = action === 'fill'
+    ? `fill "${value}" into`
+    : 'click';
+
+  const prompt = [
+    `I need to ${actionDescription} the element described as: "${hint}"`,
+    ``,
+    `Look at this screenshot of a web page.`,
+    `Find the element and return the best CSS selector to target it.`,
+    ``,
+    `Rules:`,
+    `- Prefer selectors using id, name, aria-label, placeholder, or data-testid attributes`,
+    `- If those are not available, use a short class-based selector`,
+    `- If the element is a button or link, you can use text content`,
+    `- Return ONLY a JSON object, no explanation, no markdown`,
+    ``,
+    `Schema:`,
+    `{`,
+    `  "found": true,`,
+    `  "selector": "CSS selector string",`,
+    `  "fallbackText": "visible text on the element if selector might be fragile",`,
+    `  "confidence": 0-100,`,
+    `  "reasoning": "one sentence"`,
+    `}`,
+    ``,
+    `If the element is not visible in the screenshot:`,
+    `{ "found": false, "reasoning": "why not visible" }`,
+  ].join('\n');
+
+  // Call Gemini Vision API
+  let geminiResponse: { found: boolean; selector?: string; fallbackText?: string; confidence?: number; reasoning?: string };
+
+  try {
+    const geminiModel = process.env.GEMINI_VISION_MODEL ?? 'gemini-1.5-flash';
+    const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${geminiModel}:generateContent?key=${geminiKey}`;
+
+    const body = {
+      contents: [{
+        parts: [
+          {
+            inline_data: {
+              mime_type: 'image/jpeg',
+              data: screenshotBase64,
+            },
+          },
+          {
+            text: prompt,
+          },
+        ],
+      }],
+      generationConfig: {
+        temperature: 0.1,
+        maxOutputTokens: 300,
+      },
+    };
+
+    const response = await fetch(apiUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.warn(`[Tier 5] Gemini API error ${response.status}: ${errorText.slice(0, 200)}`);
+      return null;
+    }
+
+    const data = await response.json() as {
+      candidates?: Array<{
+        content?: { parts?: Array<{ text?: string }> };
+      }>;
+    };
+
+    const rawText = data.candidates?.[0]?.content?.parts?.[0]?.text ?? '';
+    if (!rawText) {
+      console.warn('[Tier 5] Gemini returned empty response');
+      return null;
+    }
+
+    // Strip markdown fences if Gemini wrapped the JSON
+    const cleaned = rawText.replace(/^```(?:json)?\n?/m, '').replace(/\n?```$/m, '').trim();
+    geminiResponse = JSON.parse(cleaned);
+
+    console.log(`[Tier 5] Gemini response: found=${geminiResponse.found} confidence=${geminiResponse.confidence}% reasoning="${geminiResponse.reasoning}"`);
+
+  } catch (e) {
+    console.warn('[Tier 5] Gemini call failed:', (e as Error).message);
+    return null;
+  }
+
+  if (!geminiResponse.found || !geminiResponse.selector) {
+    console.log('[Tier 5] Gemini says element not visible in screenshot');
+    return null;
+  }
+
+  // Validate the Gemini selector exists in the DOM before trusting it
+  const selectorExists = await page.locator(geminiResponse.selector).count()
+    .then(c => c > 0)
+    .catch(() => false);
+
+  if (!selectorExists) {
+    console.log(`[Tier 5] ⚠ Gemini selector "${geminiResponse.selector}" not found in DOM.`);
+
+    // Try fallback text if available
+    if (geminiResponse.fallbackText) {
+      console.log(`[Tier 5] Trying fallback text: "${geminiResponse.fallbackText}"`);
+      try {
+        const loc = page.getByText(geminiResponse.fallbackText, { exact: false }).first();
+        await loc.waitFor({ state: 'visible', timeout: 2000 });
+        if (action === 'fill' && value) {
+          await loc.click({ timeout: 2000 });
+          await loc.fill(value, { timeout: 3000 });
+        } else {
+          await loc.click({ timeout: 2000 });
+        }
+        console.log(`[Tier 5] ✓ Success via vision fallback text: "${geminiResponse.fallbackText}"`);
+        return {
+          success: true,
+          strategy: `vision-text:${geminiResponse.fallbackText}`,
+          tier: 5,
+        };
+      } catch {
+        console.log('[Tier 5] Fallback text also failed');
+      }
+    }
+    return null;
+  }
+
+  // Try the Gemini-suggested selector
+  try {
+    const loc = page.locator(geminiResponse.selector).first();
+    await loc.waitFor({ state: 'visible', timeout: 3000 });
+
+    if (action === 'fill' && value !== undefined) {
+      await loc.click({ timeout: 2000 });
+      await loc.fill(value, { timeout: 3000 });
+    } else {
+      await loc.click({ timeout: 2000 });
+    }
+
+    console.log(`[Tier 5] ✓ Vision success: "${geminiResponse.selector}" (confidence: ${geminiResponse.confidence}%)`);
+    return {
+      success: true,
+      strategy: `vision:${geminiResponse.selector}`,
+      tier: 5,
+    };
+  } catch (e) {
+    console.warn('[Tier 5] Gemini selector interaction failed:', (e as Error).message);
+
+    // Last attempt: JavaScript click directly
+    try {
+      const jsClicked = await page.evaluate((sel: string) => {
+        const el = document.querySelector(sel) as HTMLElement | null;
+        if (el) { el.click(); return true; }
+        return false;
+      }, geminiResponse.selector);
+
+      if (jsClicked) {
+        console.log(`[Tier 5] ✓ Vision JS click succeeded: "${geminiResponse.selector}"`);
+        return {
+          success: true,
+          strategy: `vision-js:${geminiResponse.selector}`,
+          tier: 5,
+        };
+      }
+    } catch { /* give up */ }
+  }
+
+  return null;
+}
+
 // ─── Tier 0: Direct Selector ──────────────────────────────────────────────────
 
 async function tier0Direct(
@@ -926,12 +1142,13 @@ async function tier0Direct(
 
 // ─── Main Export: Smart Find & Act ───────────────────────────────────────────
 //
-// WEEK 2: Memory Tier added before Tier 0.
-// Flow is now:
-//   Memory (Tier -1) → Tier 0 → DOM settle → Tier 1 → networkidle → Tier 2 → Tier 3 → Tier 4
+// WEEK 3: Tier 5 Vision (Gemini) added as final fallback.
+// Full flow:
+//   Memory (Tier -1) → Tier 0 → DOM settle → Tier 1 → networkidle →
+//   Tier 2 → Tier 3 → Tier 4 → Tier 5 (Vision/Gemini) → throw
 //
 // After any successful result, recordSuccess() is called so the winning
-// selector is remembered for the next time this hint appears on this domain.
+// selector is remembered for next time.
 
 export async function smartFindAndAct(
   page: import('playwright').Page,
@@ -953,9 +1170,7 @@ export async function smartFindAndAct(
 
   const pageUrl = page.url();
 
-  // ── WEEK 2: Memory Tier (Tier -1) ────────────────────────────────────────
-  // Try to use a remembered selector from a previous successful run on this
-  // domain. This bypasses all tiers entirely when it works.
+  // ── MEMORY TIER (Tier -1) ─────────────────────────────────────────────────
 
   const rememberedSelector = await getBestSelector(pageUrl, hint);
   if (rememberedSelector) {
@@ -973,7 +1188,6 @@ export async function smartFindAndAct(
 
       console.log(`[Memory] ✓ Used remembered selector — bypassed all tiers`);
       const result: ActionResult = { success: true, strategy: `memory:${rememberedSelector}`, tier: -1 };
-      // Record another success to reinforce this entry's ranking
       await recordSuccess(pageUrl, hint, rememberedSelector, -1);
       return result;
     } catch {
@@ -1060,10 +1274,19 @@ export async function smartFindAndAct(
     }
   }
 
+  // ── Tier 5: Vision fallback (Gemini Flash) — WEEK 3 ──────────────────────
+  console.log('[SmartBrowser] Tier 4 failed — escalating to Tier 5 (Vision/Gemini)');
+  const t5 = await tier5VisionGemini(page, hint, action, value);
+  if (t5) {
+    await recordSuccess(pageUrl, hint, t5.strategy, t5.tier);
+    return t5;
+  }
+
   const currentUrl = page.url();
   throw new Error(
     `All tiers failed for "${hint}" (${action}) on ${currentUrl}.\n` +
-    `Tried: memory → direct selector → DOM settle + fuzzy scan → networkidle + accessibility+Groq → HTML+Groq replan → URL fallback.`
+    `Tried: memory → direct selector → DOM settle + fuzzy scan → networkidle + accessibility+Groq → HTML+Groq replan → URL fallback → Vision/Gemini.\n` +
+    `If GEMINI_API_KEY is not set, get a free key at https://aistudio.google.com to enable Vision Tier 5.`
   );
 }
 
