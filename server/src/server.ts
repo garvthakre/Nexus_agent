@@ -5,7 +5,7 @@ import WebSocket, { WebSocketServer } from 'ws';
 import cors from 'cors';
 import { v4 as uuidv4 } from 'uuid';
 
-import { planTask } from './ai/planner';
+import { planTask , replanFromStep } from './ai/planner';
 import { reviewPlan } from './ai/reviewer';
 import { executeStep, getLivePage } from './executor/stepExecutor';
 import { logExecution, getFailureStats } from './utils/executionLogger';
