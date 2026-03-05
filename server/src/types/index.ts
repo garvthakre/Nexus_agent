@@ -1,170 +1,138 @@
-// ─── Capability & Plan Types ──────────────────────────────────────────────────
-
 export type Capability =
-  | 'open_application'
-  | 'set_wallpaper'
-  | 'run_shell_command'
-  | 'browser_open'
-  | 'browser_fill'
+  | 'browser_navigate'
   | 'browser_click'
-  | 'type_text'
-  | 'create_file'
-  | 'create_folder'
-  | 'wait'
-  | 'download_file'
-  | 'app_find_window'
-  | 'app_focus_window'
-  | 'app_click'
-  | 'app_type'
-  | 'app_screenshot'
-  | 'app_verify'
-  | 'browser_wait_for_element'    
-  | 'browser_get_page_state'      
+  | 'browser_fill'
+  | 'browser_read_page'
+  | 'browser_extract_results'
+  | 'browser_scroll'
+  | 'browser_screenshot'
+  | 'browser_wait_for_element'   // ← NEW (Week 2 Task 7)
+  | 'browser_get_page_state'     // ← NEW (Week 2 Task 7)
+  | 'open_application'
+  | 'close_application'
+  | 'send_keys'
+  | 'get_clipboard'
+  | 'set_clipboard'
+  | 'run_script';
 
-export type SafetyRisk = 'low' | 'medium' | 'high'
-
-export interface StepParameters {
-  app_name?:             string
-  query?:                string
-  command?:              string
-  url?:                  string
-  selector?:             string
-  value?:                string
-  text?:                 string
-  path?:                 string
-  destination?:          string
-  content?:              string
-  seconds?:              number
-  element_name?:         string
-  variable_name?:        string
-  topic?:                string
-  count?:                number
-  target_description?:   string   // for browser_screenshot_analyze (Week 3)
-}
+// ─── Plan ─────────────────────────────────────────────────────────────────────
 
 export interface PlanStep {
-  step_number:  number
-  description:  string
-  capability:   Capability
-  parameters:   StepParameters
-  safety_risk:  SafetyRisk
+  step_number:    number;
+  capability:     Capability;
+  description:    string;
+  parameters:     Record<string, unknown>;
+  optional?:      boolean;
+  wait_after_ms?: number;
 }
 
 export interface Plan {
-  intent:                string
-  confidence:            number
-  requires_confirmation: boolean
-  summary:               string
-  steps:                 PlanStep[]
+  summary:    string;
+  steps:      PlanStep[];
+  created_at: string;
 }
 
-// ─── Review Types ─────────────────────────────────────────────────────────────
+// ─── Step Result ──────────────────────────────────────────────────────────────
 
-export type ReviewVerdict = 'SAFE' | 'UNSAFE' | 'REVIEW_REQUIRED'
-
-export interface ReviewResult {
-  verdict:        ReviewVerdict
-  confidence:     number
-  risks:          string[]
-  safe_steps:     number[]
-  risky_steps:    number[]
-  recommendation: string
-}
-
-// ─── Execution State ──────────────────────────────────────────────────────────
-
-export type ExecutionStatus = 'idle' | 'executing' | 'completed' | 'failed' | 'stopped'
+export type ChangeType = 'url' | 'content' | 'none';
 
 export interface StepResult {
-  success:     boolean
-  message?:    string
-  stdout?:     string
-  stderr?:     string
-  url?:        string
-  title?:      string
-  path?:       string
-  warning?:    string
-  strategy?:   string
-  electron?:   boolean
-  cdp_port?:   number
-  navigated?:  boolean           // NEW: did click cause navigation
-  changeType?: string            // NEW: 'navigation' | 'content-update' | 'none'
-  elements?:   Array<{ title: string; control_type: string; auto_id: string }>
-  [key: string]: unknown
+  stepNumber: number;
+  success:    boolean;
+  output?:    unknown;
+  error?:     string;
+  strategy?:  string;   // which tier/selector worked (from Browserengine)
+  tier?:      number;   // -1=memory, 0-4=tiers
+
+  // ── NEW fields (Week 2 Task 7) ────────────────────────────────────────────
+  navigated?:   boolean;      // true if this step caused a page navigation
+  changeType?:  ChangeType;   // what kind of change was detected after click
+  electron?:    boolean;      // true if step was executed via Electron CDP
+  cdp_port?:    number;       // CDP port used for Electron steps
 }
 
-export interface StepExecutionResult {
-  stepNumber: number
-  success:    boolean
-  result?:    StepResult
-  error?:     string
-  duration?:  number
+// ─── Execution Log (mirrors server ExecutionLog) ───────────────────────────
+
+export interface StepLog {
+  stepNumber:    number;
+  capability:    Capability;
+  description:   string;
+  success:       boolean;
+  strategy?:     string;
+  errorMessage?: string;
+  durationMs:    number;
+  retryCount:    number;
+  pageUrl?:      string;
 }
 
-export interface ExecutionSummary {
-  total:    number
-  success:  number
-  failed:   number
-  duration: number
+export interface ExecutionLog {
+  timestamp:      string;
+  sessionId:      string;
+  prompt:         string;
+  intent:         string;
+  provider:       string;
+  totalSteps:     number;
+  steps:          StepLog[];
+  overallSuccess: boolean;
+  successRate:    number;
+  durationMs:     number;
 }
 
-export interface ExecutionState {
-  status:         ExecutionStatus
-  currentStep:    number | null
-  completedSteps: number[]
-  failedStep:     number | null
-  stepResults:    Record<number, StepResult>
-  summary:        ExecutionSummary | null
+// ─── WebSocket Broadcast Message Types ───────────────────────────────────────
+//
+// These mirror the `type` field used in broadcast() calls in server.ts.
+// The union lets the frontend switch on event.type with full type safety.
+
+export type BroadcastEvent =
+  | { type: 'planning';    message: string }
+  | { type: 'plan_ready';  sessionId: string; plan: Plan }
+  | { type: 'step_start';  sessionId: string; stepNumber: number; description: string }
+  | { type: 'step_done';   sessionId: string; stepNumber: number; result: StepResult }
+  | { type: 'step_error';  sessionId: string; stepNumber: number; error: string }
+  | { type: 'task_done';   sessionId: string; results: StepResult[]; summary: string }
+  | { type: 'task_error';  sessionId: string; error: string }
+  // ── NEW (Week 2 re-planning) ────────────────────────────────────────────
+  | { type: 'replanning';  sessionId: string; fromStep: number; reason: string }
+  | { type: 'replan_done'; sessionId: string; newStepCount: number };
+
+// ─── Session / API Types ──────────────────────────────────────────────────────
+
+export interface SessionState {
+  sessionId:   string;
+  status:      'idle' | 'planning' | 'executing' | 'done' | 'error';
+  plan?:       Plan;
+  results:     StepResult[];
+  startedAt?:  string;
+  finishedAt?: string;
 }
 
-// ─── Session ──────────────────────────────────────────────────────────────────
-
-export interface Session {
-  plan:        Plan
-  status:      ExecutionStatus
-  currentStep: number
-  stopped:     boolean
+export interface ApiRunRequest {
+  prompt:    string;
+  sessionId?: string;
+  provider?: 'claude' | 'openai' | 'groq';
 }
 
-// ─── WebSocket Message Types ──────────────────────────────────────────────────
-
-export type WsMessageType =
-  | 'connected'
-  | 'planning'
-  | 'plan_ready'
-  | 'execution_start'
-  | 'step_start'
-  | 'step_complete'
-  | 'step_error'
-  | 'safety_check'
-  | 'execution_complete'
-  | 'execution_failed'
-  | 'execution_stopped'
-  | 'error'
-
-export interface WsMessage {
-  type:        WsMessageType
-  sessionId?:  string
-  message?:    string
-  plan?:       Plan
-  step?:       PlanStep
-  stepNumber?: number
-  result?:     StepResult
-  results?:    StepExecutionResult[]
-  totalSteps?: number
-  duration?:   number
-  error?:      string
-  summary?:    ExecutionSummary
+export interface ApiRunResponse {
+  sessionId: string;
+  plan:      Plan;
 }
 
-// ─── Activity Log ─────────────────────────────────────────────────────────────
+// ─── Selector Memory Stats (for /api/logs response) ───────────────────────
 
-export interface ActivityEvent {
-  type:    WsMessageType
-  message: string
-  time:    string
+export interface SelectorMemoryStats {
+  totalDomains:   number;
+  totalHints:     number;
+  totalSelectors: number;
+  topDomains:     Array<{ domain: string; hints: number }>;
 }
 
-// ─── Step Status ──────────────────────────────────────────────────────────────
+// ─── Health Check ─────────────────────────────────────────────────────────────
 
-export type StepStatus = 'pending' | 'running' | 'complete' | 'error'
+export interface HealthResponse {
+  status:        'ok' | 'degraded';
+  uptime:        number;
+  version:       string;
+  memoryStats?:  SelectorMemoryStats;
+  successRate?:  number;
+  totalRuns?:    number;
+}
