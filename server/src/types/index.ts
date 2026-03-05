@@ -26,7 +26,8 @@ export type Capability =
   | 'browser_extract_results'
   | 'browser_wait_for_element'      
   | 'browser_get_page_state'       
-  | 'browser_screenshot_analyze'     
+  | 'browser_screenshot_analyze' 
+  | 'browser_screenshot'    
 
   // App automation
   | 'open_application'
