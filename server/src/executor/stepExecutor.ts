@@ -296,6 +296,12 @@ export async function executeStep(step: PlanStep): Promise<StepResult> {
     case 'browser_extract_results': return browserExtractResults(parameters.variable_name, parameters.count ?? 10);
     case 'browser_wait_for_element': return browserWaitForElement(parameters.selector, parameters.seconds ?? 10);
     case 'browser_get_page_state': return browserGetPageState();
+    case 'browser_screenshot_analyze':
+  return browserScreenshotAnalyze(
+    parameters.target_description,
+    parameters.action ?? 'click',
+    parameters.value
+  );
     case 'type_text':              return typeText(parameters.text);
     case 'create_file':            return createFile(parameters.path, parameters.content ?? '');
     case 'create_folder':          return createFolder(parameters.path);
@@ -1178,3 +1184,114 @@ async function fetchWallpaperImage(query: string, destPath: string): Promise<str
 }
 
 process.on('exit', () => { void browserInstance?.close(); });
+
+// ───  browser_screenshot_analyze — vision-based element selection
+//
+// Used by the planner as an EXPLICIT step when a task is known to involve
+// a visually complex or non-standard UI element.
+//
+// This is separate from Tier 5 in Browserengine.ts:
+//   - Tier 5 = automatic silent fallback inside smartFindAndAct
+//   - browser_screenshot_analyze = a deliberate planner step the AI can choose
+//
+// Uses Google Gemini Flash (FREE — 1500 req/day at aistudio.google.com).
+// Falls back gracefully if GEMINI_API_KEY is not set.
+
+async function browserScreenshotAnalyze(
+  targetDescription: string | undefined,
+  action: 'click' | 'fill' = 'click',
+  value?: string
+): Promise<StepResult> {
+  if (!targetDescription) {
+    throw new Error('browser_screenshot_analyze requires target_description parameter');
+  }
+
+  const page = await ensurePlaywright();
+
+  // Take a viewport screenshot (not full page — keeps it fast and under API limits)
+  const screenshot = await page.screenshot({ type: 'jpeg', quality: 80, fullPage: false });
+  const base64 = screenshot.toString('base64');
+
+  const geminiKey = process.env.GEMINI_API_KEY;
+  if (!geminiKey || geminiKey === 'your_gemini_api_key_here') {
+    // Graceful fallback: try smartFindAndAct directly without vision
+    console.warn('[Vision] GEMINI_API_KEY not set — falling back to smartFindAndAct directly');
+    console.warn('[Vision] Get a free key at https://aistudio.google.com → Get API Key');
+    const result = await smartFindAndAct(page, targetDescription, action, value);
+    return {
+      success: true,
+      message: `Action performed (no vision key — used DOM fallback): "${targetDescription}"`,
+      strategy: result.strategy,
+    };
+  }
+
+  const geminiModel = process.env.GEMINI_VISION_MODEL ?? 'gemini-1.5-flash';
+  const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${geminiModel}:generateContent?key=${geminiKey}`;
+
+  const prompt = [
+    `I need to ${action === 'fill' ? `fill "${value}" into` : 'click'} the element: "${targetDescription}"`,
+    ``,
+    `Look at this screenshot of a web page and find the CSS selector for that element.`,
+    ``,
+    `Rules:`,
+    `- Prefer id, name, aria-label, placeholder, or data-testid attributes`,
+    `- If unavailable, use a short stable class-based selector`,
+    `- For buttons/links, text content is acceptable`,
+    `- Reply ONLY with a JSON object, no markdown, no explanation`,
+    ``,
+    `{ "found": true, "selector": "CSS selector", "fallbackText": "visible text if selector fragile", "confidence": 0-100 }`,
+    `or if not visible: { "found": false, "reason": "why" }`,
+  ].join('\n');
+
+  let geminiSelector: string | null = null;
+  let fallbackText: string | null = null;
+
+  try {
+    const response = await fetch(apiUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        contents: [{
+          parts: [
+            { inline_data: { mime_type: 'image/jpeg', data: base64 } },
+            { text: prompt },
+          ],
+        }],
+        generationConfig: { temperature: 0.1, maxOutputTokens: 200 },
+      }),
+    });
+
+    if (!response.ok) {
+      throw new Error(`Gemini API ${response.status}: ${await response.text()}`);
+    }
+
+    const data = await response.json() as {
+      candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
+    };
+
+    const rawText = data.candidates?.[0]?.content?.parts?.[0]?.text ?? '';
+    const cleaned = rawText.replace(/^```(?:json)?\n?/m, '').replace(/\n?```$/m, '').trim();
+    const parsed = JSON.parse(cleaned);
+
+    if (parsed.found && parsed.selector) {
+      geminiSelector = parsed.selector;
+      fallbackText = parsed.fallbackText ?? null;
+      console.log(`[Vision] Gemini returned selector: "${geminiSelector}" (confidence: ${parsed.confidence}%)`);
+    } else {
+      console.warn(`[Vision] Gemini could not find element: ${parsed.reason}`);
+    }
+  } catch (e) {
+    console.warn('[Vision] Gemini call failed:', (e as Error).message);
+  }
+
+  // Try Gemini selector first, then fallback text, then original description
+  const selectorToTry = geminiSelector ?? fallbackText ?? targetDescription;
+
+  const result = await smartFindAndAct(page, selectorToTry, action, value);
+
+  return {
+    success: true,
+    message: `Vision fallback succeeded: "${selectorToTry}"`,
+    strategy: geminiSelector ? `vision:${selectorToTry}` : `vision-fallback:${selectorToTry}`,
+  };
+}
