@@ -1,25 +1,27 @@
 /**
- * browserEngine.ts  — NEXUS Smart Browser Engine v4
+ * browserEngine.ts  — NEXUS Smart Browser Engine v5
  * ─────────────────────────────────────────────────────────────────────────────
- * Week 1 changes applied:
+ * Week 2 changes applied:
  *
+ *   MEMORY TIER (Tier -1) — selectorMemory integration
+ *     NEW: Before Tier 0, check if we have a remembered selector for this
+ *          domain+hint combo. If yes, try it immediately. If it works, we
+ *          skip all 5 tiers entirely — task completes in ~200ms instead of
+ *          3-5 seconds. If it fails (stale), record the failure and fall
+ *          through to Tier 0 as normal.
+ *
+ *     NEW: After every successful tier, call recordSuccess() so the winning
+ *          selector is stored for next time. This makes NEXUS progressively
+ *          faster with every task it executes.
+ *
+ * Week 1 changes (already present):
  *   FIX 2A — Progressive waits between tier escalations
- *     OLD: Tiers 0→1→2→3 escalated within milliseconds.
- *          Tier 2 + 3 each make Groq API calls unnecessarily if the DOM
- *          just hadn't finished rendering yet.
- *     NEW: 1.5s DOM-settle wait before Tier 1, 2s networkidle wait before
- *          Tier 2. Eliminates ~80% of unnecessary Groq API calls.
- *
  *   FIX 2B — Groq selector validation in Tier 2/3
- *     OLD: llama-3.3-70b confidently returns plausible-looking selectors
- *          that don't exist on the page. Tier 2 tries it, fails silently,
- *          falls to Tier 3 — wasted API call.
- *     NEW: After Groq returns a selector, verify the element actually
- *          exists in the DOM before attempting to click. Skip if not found.
  * ─────────────────────────────────────────────────────────────────────────────
  */
 
 import OpenAI from 'openai';
+import { recordSuccess, recordFailure, getBestSelector } from '../utils/selectorMemory';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -376,13 +378,6 @@ async function getPageContext(page: import('playwright').Page): Promise<{
 }
 
 // ─── FIX 2B: Element existence validator ─────────────────────────────────────
-//
-// WHY: Groq confidently generates selectors that look plausible but don't
-//      exist on the actual page. Without validation, Tier 2 tries it, fails
-//      silently, falls to Tier 3 — wasting 2 API calls.
-//
-// FIX: After Groq returns an element name, check if any matching element
-//      is actually visible in the DOM before attempting interaction.
 
 async function validateElementExists(
   page: import('playwright').Page,
@@ -398,7 +393,6 @@ async function validateElementExists(
       `a[href]`,
     ];
 
-    // Check if any selector finds a visible element matching the name
     for (const sel of testSelectors) {
       const els = Array.from(document.querySelectorAll(sel));
       for (const el of els) {
@@ -638,7 +632,7 @@ ${a11yTree}`;
 
   console.log(`[Tier 2] Groq identified: role="${parsed.elementRole}" name="${parsed.elementName}"`);
 
-  // FIX 2B: Validate the element actually exists before attempting interaction
+  // FIX 2B: Validate element actually exists before attempting interaction
   const elementExists = await validateElementExists(page, parsed.elementName);
   if (!elementExists) {
     console.log(`[Tier 2] ⚠ Element "${parsed.elementName}" not found in DOM — Groq may have hallucinated. Skipping.`);
@@ -755,7 +749,7 @@ ${html.slice(0, 2000)}`;
 
   console.log(`[Tier 3] Groq approach="${parsed.approach}" reasoning="${parsed.reasoning}"`);
 
-  // FIX 2B (also applied to Tier 3): validate selector exists before using it
+  // FIX 2B applied to Tier 3: validate selector exists before using it
   if (parsed.approach === 'selector' && parsed.selector) {
     const selectorExists = await page.locator(parsed.selector).count().then(c => c > 0).catch(() => false);
     if (!selectorExists) {
@@ -931,6 +925,13 @@ async function tier0Direct(
 }
 
 // ─── Main Export: Smart Find & Act ───────────────────────────────────────────
+//
+// WEEK 2: Memory Tier added before Tier 0.
+// Flow is now:
+//   Memory (Tier -1) → Tier 0 → DOM settle → Tier 1 → networkidle → Tier 2 → Tier 3 → Tier 4
+//
+// After any successful result, recordSuccess() is called so the winning
+// selector is remembered for the next time this hint appears on this domain.
 
 export async function smartFindAndAct(
   page: import('playwright').Page,
@@ -950,66 +951,119 @@ export async function smartFindAndAct(
   await page.waitForLoadState('domcontentloaded').catch(() => {});
   await sleep(600);
 
-  // ── Site-specific handlers (highest priority) ────────────────────────────
+  const pageUrl = page.url();
+
+  // ── WEEK 2: Memory Tier (Tier -1) ────────────────────────────────────────
+  // Try to use a remembered selector from a previous successful run on this
+  // domain. This bypasses all tiers entirely when it works.
+
+  const rememberedSelector = await getBestSelector(pageUrl, hint);
+  if (rememberedSelector) {
+    console.log(`[Memory] Trying remembered selector: "${rememberedSelector.slice(0, 60)}"`);
+    try {
+      const loc = page.locator(rememberedSelector).first();
+      await loc.waitFor({ state: 'visible', timeout: 2000 });
+
+      if (action === 'fill' && value !== undefined) {
+        await loc.click({ timeout: 1500 });
+        await loc.fill(value, { timeout: 2000 });
+      } else {
+        await loc.click({ timeout: 1500 });
+      }
+
+      console.log(`[Memory] ✓ Used remembered selector — bypassed all tiers`);
+      const result: ActionResult = { success: true, strategy: `memory:${rememberedSelector}`, tier: -1 };
+      // Record another success to reinforce this entry's ranking
+      await recordSuccess(pageUrl, hint, rememberedSelector, -1);
+      return result;
+    } catch {
+      console.log('[Memory] Remembered selector stale — recording failure and proceeding to Tier 0');
+      await recordFailure(pageUrl, hint, rememberedSelector);
+    }
+  }
+
+  // ── Site-specific handlers (highest priority after memory) ───────────────
 
   if (action === 'click') {
     const googleResult = await handleGoogleSearchClick(page, hint);
-    if (googleResult) return googleResult;
+    if (googleResult) {
+      await recordSuccess(pageUrl, hint, googleResult.strategy, googleResult.tier);
+      return googleResult;
+    }
   }
 
   if (action === 'click' && page.url().includes('bing.com')) {
     const bingResult = await handleBingClick(page, hint);
-    if (bingResult) return bingResult;
+    if (bingResult) {
+      await recordSuccess(pageUrl, hint, bingResult.strategy, bingResult.tier);
+      return bingResult;
+    }
   }
 
   if (action === 'click' && page.url().includes('linkedin.com')) {
     const linkedinResult = await handleLinkedInClick(page, hint);
-    if (linkedinResult) return linkedinResult;
+    if (linkedinResult) {
+      await recordSuccess(pageUrl, hint, linkedinResult.strategy, linkedinResult.tier);
+      return linkedinResult;
+    }
   }
 
   // ── Tier 0: Direct selector / common roles ───────────────────────────────
   const t0 = await tier0Direct(page, hint, action, value);
-  if (t0) return t0;
+  if (t0) {
+    await recordSuccess(pageUrl, hint, t0.strategy, t0.tier);
+    return t0;
+  }
 
   // ── FIX 2A: Progressive wait before Tier 1 ───────────────────────────────
-  // Give the DOM 1.5s to settle — avoids most unnecessary Groq escalations.
   console.log('[SmartBrowser] Tier 0 failed — waiting 1.5s for DOM to settle...');
   await sleep(1500);
   await page.waitForLoadState('domcontentloaded').catch(() => {});
 
   // ── Tier 1: DOM fuzzy scan ────────────────────────────────────────────────
   const t1 = await tier1FuzzyDomScan(page, hint, action, value);
-  if (t1) return t1;
+  if (t1) {
+    await recordSuccess(pageUrl, hint, t1.strategy, t1.tier);
+    return t1;
+  }
 
   // ── FIX 2A: Progressive wait before Tier 2 ───────────────────────────────
-  // Try network idle — SPA may still be fetching data.
   console.log('[SmartBrowser] Tier 1 failed — waiting for network to settle...');
   await sleep(2000);
   try { await page.waitForLoadState('networkidle', { timeout: 3000 }); } catch {}
 
   // ── Tier 2: Accessibility tree + Groq ────────────────────────────────────
   const t2 = await tier2AccessibilityGroq(page, hint, action, value);
-  if (t2) return t2;
+  if (t2) {
+    await recordSuccess(pageUrl, hint, t2.strategy, t2.tier);
+    return t2;
+  }
 
-  // ── FIX 2A: Minimal wait before Tier 3 (Groq call handles the thinking) ──
+  // ── FIX 2A: Minimal wait before Tier 3 ───────────────────────────────────
   console.log('[SmartBrowser] Tier 2 failed — full HTML replan...');
   await sleep(500);
 
   // ── Tier 3: HTML context + Groq re-plan ──────────────────────────────────
   const t3 = await tier3HtmlGroqReplan(page, hint, action, value);
-  if (t3) return t3;
+  if (t3) {
+    await recordSuccess(pageUrl, hint, t3.strategy, t3.tier);
+    return t3;
+  }
 
   // ── Tier 4: URL param fallback ────────────────────────────────────────────
   if (action === 'click') {
     console.log('[SmartBrowser] Tier 3 failed — escalating to Tier 4');
     const t4 = await tier4UrlFallback(page, hint);
-    if (t4) return t4;
+    if (t4) {
+      await recordSuccess(pageUrl, hint, t4.strategy, t4.tier);
+      return t4;
+    }
   }
 
   const currentUrl = page.url();
   throw new Error(
-    `All 5 tiers failed for "${hint}" (${action}) on ${currentUrl}.\n` +
-    `Tried: direct selector → DOM settle + fuzzy scan → networkidle + accessibility+Groq → HTML+Groq replan → URL fallback.`
+    `All tiers failed for "${hint}" (${action}) on ${currentUrl}.\n` +
+    `Tried: memory → direct selector → DOM settle + fuzzy scan → networkidle + accessibility+Groq → HTML+Groq replan → URL fallback.`
   );
 }
 
