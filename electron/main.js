@@ -1,8 +1,9 @@
-const { app, BrowserWindow, ipcMain, shell } = require('electron')
+const { app, BrowserWindow, ipcMain, shell, screen } = require('electron')
 const path = require('path')
 const { spawn } = require('child_process')
 
 let mainWindow
+let overlayWindow
 let backendProcess
 
 function startBackend() {
@@ -28,6 +29,42 @@ function startBackend() {
   })
 }
 
+function createOverlay() {
+  const { width, height } = screen.getPrimaryDisplay().workAreaSize
+
+  const W = 280
+  const H = 48
+  const MARGIN = 16
+
+  overlayWindow = new BrowserWindow({
+    width: W,
+    height: H,
+    x: width - W - MARGIN,
+    y: height - H - MARGIN,
+    frame: false,
+    transparent: true,
+    alwaysOnTop: true,
+    skipTaskbar: true,
+    resizable: false,
+    movable: false,
+    focusable: false,
+    hasShadow: false,
+    type: 'panel',
+    webPreferences: {
+      nodeIntegration: false,
+      contextIsolation: true,
+    }
+  })
+
+  overlayWindow.setAlwaysOnTop(true, 'screen-saver')
+  overlayWindow.setIgnoreMouseEvents(true)
+  overlayWindow.setVisibleOnAllWorkspaces(true)
+
+  overlayWindow.loadFile(path.join(__dirname, 'overlay.html'))
+
+  overlayWindow.on('closed', () => { overlayWindow = null })
+}
+
 function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1400,
@@ -45,7 +82,6 @@ function createWindow() {
     icon: path.join(__dirname, 'icon.png')
   })
 
-  // Load Next.js frontend
   const isDev = process.env.NODE_ENV === 'development'
   if (isDev) {
     mainWindow.loadURL('http://localhost:3000')
@@ -59,8 +95,10 @@ function createWindow() {
 
 app.whenReady().then(() => {
   startBackend()
-  // Give backend time to start
-  setTimeout(createWindow, 1500)
+  setTimeout(() => {
+    createWindow()
+    createOverlay()
+  }, 1500)
 })
 
 app.on('window-all-closed', () => {
