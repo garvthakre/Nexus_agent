@@ -10,6 +10,8 @@ import { PlanStep, StepResult } from '../types';
 import { appFindWindow, appClick, appType, appFocusWindow, appScreenshot, appVerify } from './desktopEngine';
 import { openApplicationWindows } from './windowsAppLauncher';
 import { smartFindAndAct } from './Browserengine';
+ 
+import { humanDelay, humanTypeIntoPage, buildVisibleCmdScript } from '../utils/humanTyping';
 
 const execAsync = promisify(exec);
 
@@ -132,7 +134,6 @@ async function isPageAlive(page: import('playwright').Page): Promise<boolean> {
   catch { return false; }
 }
 
-/** Expose the live page instance for mid-execution re-planning. */
 export function getLivePage(): import('playwright').Page | null {
   return pageInstance;
 }
@@ -264,19 +265,17 @@ async function handleBotDetection(page: import('playwright').Page): Promise<void
     }
   }
 
-  // FIX 1E: Hard throw instead of silent continue
   const finalTitle = await page.title().catch(() => '');
   const isReallyBlocked = botSignals.some(s => finalTitle.toLowerCase().includes(s));
 
   if (isReallyBlocked) {
     throw new BotDetectionError(
       url,
-      `Bot detection active on ${url} after 20s — ` +
-      `try a different URL or add stealth cookies for this domain`
+      `Bot detection active on ${url} after 20s`
     );
   }
 
-  console.log('[Browser] ✓ Bot detection cleared (stealth mode worked)');
+  console.log('[Browser] ✓ Bot detection cleared');
 }
 
 // ─── Main Dispatcher ──────────────────────────────────────────────────────────
@@ -313,7 +312,7 @@ export async function executeStep(step: PlanStep): Promise<StepResult> {
     case 'app_type':               return appTypeStep(parameters.app_name, parameters.element_name, parameters.text);
     case 'app_screenshot':         return appScreenshotStep(parameters.app_name);
     case 'app_verify':             return appVerifyStep(parameters.app_name, parameters.text);
-    case 'browser_screenshot':         return browserTakeScreenshot(parameters.path);
+    case 'browser_screenshot':     return browserTakeScreenshot(parameters.path);
     default: throw new Error(`Unknown capability: ${capability}`);
   }
 }
@@ -369,12 +368,11 @@ async function browserOpen(url: string | undefined): Promise<StepResult> {
 
 async function getPageSnapshot(page: import('playwright').Page): Promise<{ url: string; textLen: number; linkCount: number }> {
   try {
-    const snap = await page.evaluate(() => ({
+    return await page.evaluate(() => ({
       url:       window.location.href,
       textLen:   (document.body.textContent ?? '').length,
       linkCount: document.querySelectorAll('a[href]').length,
     }));
-    return snap;
   } catch {
     return { url: page.url(), textLen: 0, linkCount: 0 };
   }
@@ -393,11 +391,13 @@ async function verifyClickEffect(
   const changed = urlChanged || contentChanged;
 
   let changeType = 'none';
-  if (urlChanged)     changeType = 'navigation';
+  if (urlChanged)          changeType = 'navigation';
   else if (contentChanged) changeType = 'content-update';
 
   return { changed, newUrl: after.url, newTitle, changeType };
 }
+
+// ─── browserFill ─────────────────────────────────────────────────────────────
 
 async function browserFill(selector: string | undefined, value: string | undefined): Promise<StepResult> {
   if (!selector) throw new Error('selector is required');
@@ -414,7 +414,11 @@ async function browserFill(selector: string | undefined, value: string | undefin
       await sleep(300);
       await page.keyboard.press('Control+a');
       await sleep(100);
-      await page.keyboard.type(value, { delay: 35 + Math.random() * 20 });
+   
+      // Was: page.keyboard.type(value, { delay: 35 + Math.random() * 20 })
+      // Now: humanTypeIntoPage() calls humanDelay() per character (40–90ms random)
+      await humanTypeIntoPage(page, value);
+      // ─────────────────────────────────────────────────────────────────────
       return { success: true, message: `Typed into contenteditable` };
     } catch (e) {
       console.warn('[browserFill] contenteditable failed:', (e as Error).message);
@@ -430,6 +434,8 @@ async function browserFill(selector: string | undefined, value: string | undefin
   };
 }
 
+// ─── browserClick ─────────────────────────────────────────────────────────────
+
 async function browserClick(selector: string | undefined): Promise<StepResult> {
   if (!selector) throw new Error('selector is required');
   const page = await ensurePlaywright();
@@ -441,24 +447,17 @@ async function browserClick(selector: string | undefined): Promise<StepResult> {
 
   await sleep(200 + Math.random() * 300);
 
-  // FIX 1D: Snapshot before click for verification
   const snapshotBefore = await getPageSnapshot(page);
-
   const result = await smartFindAndAct(page, selector, 'click');
-
-  // FIX 1D: Verify the click had an effect
   const verify = await verifyClickEffect(page, snapshotBefore);
 
-  // Warn if URL-type selector (links) didn't cause navigation
   const isLinkSelector = selector.includes('h2') || selector.includes('href') ||
                          selector.includes('a[') || selector.includes('title');
   const warning = (!verify.changed && isLinkSelector)
-    ? `Click may not have navigated — URL/content unchanged after 1.5s (changeType: ${verify.changeType})`
+    ? `Click may not have navigated — URL/content unchanged after 1.5s`
     : undefined;
 
-  if (warning) {
-    console.warn(`[browserClick] ⚠ ${warning}`);
-  }
+  if (warning) console.warn(`[browserClick] ⚠ ${warning}`);
 
   const livePage = await ensurePlaywright();
   await handleBotDetection(livePage);
@@ -478,13 +477,8 @@ async function browserClick(selector: string | undefined): Promise<StepResult> {
 
 const articleStore: Record<string, string> = {};
 
-export function getArticleStore(): Record<string, string> {
-  return { ...articleStore };
-}
-
-export function clearArticleStore(): void {
-  Object.keys(articleStore).forEach(k => delete articleStore[k]);
-}
+export function getArticleStore(): Record<string, string> { return { ...articleStore }; }
+export function clearArticleStore(): void { Object.keys(articleStore).forEach(k => delete articleStore[k]); }
 
 // ─── FIX 1B: browserReadPage — honest failure ─────────────────────────────────
 //
@@ -506,6 +500,8 @@ export class ContentExtractionError extends Error {
   }
 }
 
+let groqFailed = false;
+
 async function browserReadPage(
   variableName: string | undefined,
   topic: string | undefined,
@@ -514,7 +510,6 @@ async function browserReadPage(
   const url   = page.url();
   const title = await page.title().catch(() => 'Unknown');
 
-  // FIX 1B: Detect bot/CAPTCHA page BEFORE attempting extraction
   const isBotPage = await page.evaluate(() => {
     const t = document.title.toLowerCase();
     return t.includes('just a moment') || t.includes('access denied') ||
@@ -523,14 +518,9 @@ async function browserReadPage(
   }).catch(() => false);
 
   if (isBotPage) {
-    throw new ContentExtractionError(
-      'bot_detection',
-      url,
-      `Bot detection active on ${url} — cannot extract content`
-    );
+    throw new ContentExtractionError('bot_detection', url, `Bot detection active on ${url}`);
   }
 
-  // Extract main text
   const rawText = await page.evaluate(() => {
     const REMOVE = ['script', 'style', 'nav', 'header', 'footer', 'aside',
                     '[class*="ad"]', '[id*="ad"]', '[class*="cookie"]',
@@ -553,17 +543,14 @@ async function browserReadPage(
     return (document.body.textContent ?? '').replace(/\s+/g, ' ').trim().slice(0, 4000);
   }).catch(() => '');
 
-  // FIX 1B: Throw honestly instead of returning garbage content
   if (!rawText || rawText.length < 100) {
     throw new ContentExtractionError(
       'content_too_short',
       url,
-      `Page content too short (${rawText.length} chars) on ${url} — ` +
-      `page may not have loaded fully or requires authentication`
+      `Page content too short (${rawText.length} chars) on ${url}`
     );
   }
 
-  // Summarize via Groq
   let summary = '';
   try {
     const OpenAI = (await import('openai')).default;
@@ -575,14 +562,8 @@ async function browserReadPage(
     const resp = await groq.chat.completions.create({
       model: process.env.GROQ_MODEL ?? 'llama-3.3-70b-versatile',
       messages: [
-        {
-          role: 'system',
-          content: 'You are a concise news summarizer. Summarize the article in 3-5 sentences covering: what happened, who is involved, and why it matters. Be factual and specific. Do not add preamble.',
-        },
-        {
-          role: 'user',
-          content: `Article title: "${title}"\nURL: ${url}${topicCtx}\n\nArticle text:\n${rawText}`,
-        },
+        { role: 'system', content: 'You are a concise news summarizer. Summarize the article in 3-5 sentences. Be factual and specific.' },
+        { role: 'user',   content: `Article title: "${title}"\nURL: ${url}${topicCtx}\n\nArticle text:\n${rawText}` },
       ],
       temperature: 0.2,
       max_tokens: 250,
@@ -593,7 +574,6 @@ async function browserReadPage(
     summary = rawText.slice(0, 500).trim() + '...';
     groqFailed = true;
   }
-  
 
   const result = `Title: ${title}\nURL: ${url}\n\n${summary}`;
   if (variableName) {
@@ -601,7 +581,7 @@ async function browserReadPage(
     console.log(`[browserReadPage] Stored "${variableName}": ${result.length} chars`);
   }
 
- return {
+  return {
     success: true,
     message: `Summarized: "${title}"`,
     summary: result,
@@ -627,14 +607,14 @@ async function browserExtractResults(
 
   console.log(`[browserExtractResults] Scanning page: ${pageUrl}`);
 
-  const extracted = await page.evaluate((maxCount: number) => {
-    interface ResultItem {
-      title: string;
-      url: string;
-      description: string;
-      index: number;
-    }
+  if (pageUrl.includes('bing.com') && (pageUrl.includes('rdr=1') || pageUrl.includes('rdrig='))) {
+  console.log('[browserExtractResults] Bing redirect detected — waiting 3s for results...');
+  await sleep(3000);
+  await page.waitForLoadState('networkidle', { timeout: 5000 }).catch(() => {});
+}
 
+  const extracted = await page.evaluate((maxCount: number) => {
+    interface ResultItem { title: string; url: string; description: string; index: number; }
     const results: ResultItem[] = [];
     const seen = new Set<string>();
 
@@ -644,74 +624,52 @@ async function browserExtractResults(
       /\.(css|js|png|jpg|jpeg|gif|svg|ico|pdf|zip|xml|json)$/i,
     ];
 
-    const currentDomain = window.location.hostname;
     const currentOrigin = window.location.origin;
     const currentProtocol = window.location.protocol;
 
-    // FIX 1C: Resolve any URL (relative or absolute) to an absolute URL
     function resolveUrl(href: string): string | null {
       if (!href) return null;
       if (href.startsWith('http://') || href.startsWith('https://')) return href;
       if (href.startsWith('//')) return `${currentProtocol}${href}`;
       if (href.startsWith('/')) return `${currentOrigin}${href}`;
       if (href.startsWith('javascript:') || href.startsWith('mailto:') || href.startsWith('#')) return null;
-      // Relative path
       return `${currentOrigin}/${href}`;
     }
 
     function scoreLink(a: HTMLAnchorElement, text: string, absoluteHref: string): number {
       let score = 0;
       const rect = a.getBoundingClientRect();
-
       if (rect.width === 0 || rect.height === 0) return -1;
       if (rect.top < 0 || rect.top > window.innerHeight * 3) return -1;
-
       if (text.length > 20) score += 3;
       if (text.length > 50) score += 2;
       if (rect.top > 100) score += 1;
       if (absoluteHref.includes('/jobs/') || absoluteHref.includes('/job/')) score += 5;
       if (absoluteHref.includes('/article') || absoluteHref.includes('/post') || absoluteHref.includes('/news')) score += 4;
       if (absoluteHref.includes('/product') || absoluteHref.includes('/item') || absoluteHref.includes('/dp/')) score += 4;
-      if (absoluteHref.includes('/profile') || absoluteHref.includes('/company')) score += 3;
-      if (absoluteHref.includes(currentDomain) && absoluteHref.split('/').length < 5) score -= 2;
       if (text.length < 10) score -= 2;
-
       return score;
     }
 
     function getNearbyText(el: Element): string {
       const parent = el.closest('li, article, [class*="card"], [class*="item"], [class*="result"], [class*="job"], [class*="product"]');
-      if (parent) {
-        return (parent.textContent ?? '').replace(/\s+/g, ' ').trim().slice(0, 200);
-      }
-      return '';
+      return parent ? (parent.textContent ?? '').replace(/\s+/g, ' ').trim().slice(0, 200) : '';
     }
 
     const anchors = Array.from(document.querySelectorAll('a[href]')) as HTMLAnchorElement[];
 
     for (const a of anchors) {
-      const rawHref = a.getAttribute('href') ?? '';  // Use getAttribute for raw value
+      const rawHref = a.getAttribute('href') ?? '';
       const text = (a.textContent ?? '').replace(/\s+/g, ' ').trim();
-
       if (!rawHref || !text) continue;
-
-      // FIX 1C: Resolve to absolute URL before any checks
       const absoluteHref = resolveUrl(rawHref);
       if (!absoluteHref) continue;
-
       if (seen.has(absoluteHref)) continue;
       if (SKIP_PATTERNS.some(p => p.test(rawHref) || p.test(text))) continue;
-
       const score = scoreLink(a, text, absoluteHref);
       if (score < 0) continue;
-
       seen.add(absoluteHref);
-      results.push({
-        title: text.slice(0, 150),
-        url: absoluteHref,  // Always absolute now
-        description: getNearbyText(a),
-        index: results.length,
-      });
+      results.push({ title: text.slice(0, 150), url: absoluteHref, description: getNearbyText(a), index: results.length });
     }
 
     results.sort((a, b) => {
@@ -728,21 +686,13 @@ async function browserExtractResults(
     return results.slice(0, maxCount);
   }, count);
 
-  console.log(`[browserExtractResults] Found ${extracted.length} results on ${pageUrl}`);
-
   if (extracted.length === 0) {
-    // This is a real failure — downstream steps that depend on {{results_0_url}}
-    // will silently use unresolved templates and produce garbage output.
     throw new Error(
       `browser_extract_results: No results found on ${pageUrl}. ` +
-      `The page may not have loaded fully, or the search returned no results. ` +
-      `Try adding a browser_wait_for_element step before extracting.`
+      `The page may not have loaded fully, or the search returned no results.`
     );
   }
 
-  // ── Unwrap Bing redirect URLs (bing.com/ck/a) to real destination URLs ──
-  // Bing wraps every result in a tracking redirect. The &u= param holds
-  // the real URL as base64. Decode it so we navigate to the actual article.
   function unwrapBingUrl(url: string): string {
     if (!url.includes('bing.com/ck/a')) return url;
     try {
@@ -750,16 +700,12 @@ async function browserExtractResults(
       if (match) {
         const b64 = match[1].replace(/-/g, '+').replace(/_/g, '/');
         const decoded = Buffer.from(b64, 'base64').toString('utf-8');
-        if (decoded.startsWith('http')) {
-          console.log(`[browserExtractResults] Unwrapped Bing URL → ${decoded.slice(0, 80)}`);
-          return decoded;
-        }
+        if (decoded.startsWith('http')) return decoded;
       }
     } catch { /* fall through */ }
     return url;
   }
 
-  // Unwrap bing.com/news/topicview → convert to a real search URL
   function unwrapBingTopicView(url: string): string {
     if (!url.includes('bing.com/news/topicview')) return url;
     try {
@@ -770,11 +716,9 @@ async function browserExtractResults(
     return url;
   }
 
-  // Apply URL unwrapping + clean up domain-path titles from Bing
   for (const r of extracted) {
     r.url = unwrapBingUrl(r.url);
     r.url = unwrapBingTopicView(r.url);
-    // Bing often uses "scmp.comhttps://..." as link text — replace with description
     if (/^[\w.-]+\.(com|net|org|io|co)\b/i.test(r.title)) {
       r.title = r.description.slice(0, 100).trim() || r.title;
     }
@@ -792,58 +736,32 @@ async function browserExtractResults(
       articleStore[`${variableName}_${i}_title`] = r.title;
       articleStore[`${variableName}_${i}_desc`]  = r.description;
     });
-    console.log(`[browserExtractResults] Stored ${extracted.length} results in articleStore["${variableName}"]`);
   }
-  const summary = extracted.map((r, i) =>
-    `${i + 1}. ${r.title}\n   ${r.url}`
-  ).join('\n\n');
 
-  return {
-    success: true,
-    message: `Extracted ${extracted.length} results from ${pageUrl}`,
-    summary,
-  };
+  const summary = extracted.map((r, i) => `${i + 1}. ${r.title}\n   ${r.url}`).join('\n\n');
+  return { success: true, message: `Extracted ${extracted.length} results from ${pageUrl}`, summary };
 }
 
-// ─── New Capability: browser_wait_for_element ─────────────────────────────────
-//
-// Smarter than "wait N seconds" — waits for a specific element to appear.
-// Essential for SPAs: wait for the real content to render before extracting.
+// ─── browserWaitForElement ────────────────────────────────────────────────────
 
-async function browserWaitForElement(
-  selector: string | undefined,
-  timeoutSeconds: number
-): Promise<StepResult> {
-  if (!selector) throw new Error('selector required for browser_wait_for_element');
-
+async function browserWaitForElement(selector: string | undefined, timeoutSeconds: number): Promise<StepResult> {
+  if (!selector) throw new Error('selector required');
   const page = await ensurePlaywright();
-
   try {
-    await page.waitForSelector(selector, {
-      state: 'visible',
-      timeout: timeoutSeconds * 1000,
-    });
+    await page.waitForSelector(selector, { state: 'visible', timeout: timeoutSeconds * 1000 });
     return { success: true, message: `Element "${selector}" appeared on ${page.url()}` };
   } catch {
-    throw new Error(
-      `Element "${selector}" did not appear within ${timeoutSeconds}s on ${page.url()}`
-    );
+    throw new Error(`Element "${selector}" did not appear within ${timeoutSeconds}s on ${page.url()}`);
   }
 }
 
-// ─── New Capability: browser_get_page_state ───────────────────────────────────
-//
-// Lightweight "perception" step. Use after browser_open to verify the real
-// page loaded (not a 404, not a CAPTCHA, not an empty shell).
-// Prevents garbage from entering articleStore.
+// ─── browserGetPageState ──────────────────────────────────────────────────────
 
 async function browserGetPageState(): Promise<StepResult> {
   const page = await ensurePlaywright();
-
   const state = await page.evaluate(() => {
     const botSignals    = ['just a moment', 'access denied', 'captcha', 'are you human'];
     const errorPatterns = ['404', 'not found', 'error', 'page not exist', 'page not found'];
-
     const title    = document.title.toLowerCase();
     const isBot    = botSignals.some(s => title.includes(s));
     const isError  = errorPatterns.some(p => title.includes(p));
@@ -938,8 +856,6 @@ async function openApplicationLinux(appName: string): Promise<StepResult> {
   const LINUX_KNOWN: Record<string, string[]> = {
     chrome: ['google-chrome', 'google-chrome-stable', 'chromium'],
     firefox: ['firefox'], vscode: ['code'], discord: ['discord'],
-    telegram: ['telegram-desktop'], spotify: ['spotify'],
-    calculator: ['gnome-calculator', 'kcalc'],
   };
   const candidates: string[] = [];
   for (const [key, cmds] of Object.entries(LINUX_KNOWN)) {
@@ -996,12 +912,32 @@ async function runShellCommand(command: string | undefined): Promise<StepResult>
     return { success: true, message: `Launched: ${expanded}` };
   }
 
-  const finalCommand = expanded;
+  // ── HUMAN TYPING PATCH 2: visible CMD typing on Windows ──────────────────
+  // Non-editor, non-blocked shell commands on Windows now open a visible CMD
+  // window and type the command character by character before executing.
+  // On Mac/Linux we keep the original silent execAsync behaviour.
+  if (process.platform === 'win32') {
+    try {
+      const visibleScript = buildVisibleCmdScript(expanded);
+      console.log(`[Shell] Typing command visibly in CMD: ${expanded.slice(0, 60)}`);
+      const { stdout, stderr } = await execAsync(
+        `powershell -NoProfile -Command "${visibleScript}"`,
+        { timeout: 90_000, maxBuffer: 10 * 1024 * 1024 }
+      );
+      if (stdout.trim()) console.log(`[Shell] stdout: ${stdout.trim().slice(0, 500)}`);
+      if (stderr.trim()) console.warn(`[Shell] stderr: ${stderr.trim().slice(0, 500)}`);
+      return { success: true, stdout: stdout.trim().slice(0, 5000) };
+    } catch (err: unknown) {
+      // If visible CMD approach fails, fall through to silent execAsync
+      console.warn('[Shell] Visible CMD typing failed, falling back to silent exec:', (err as Error).message);
+    }
+  }
+  // ─────────────────────────────────────────────────────────────────────────
 
+  const finalCommand = expanded;
 
   try {
     const { stdout, stderr } = await execAsync(finalCommand, { timeout: 60_000, maxBuffer: 10 * 1024 * 1024 });
-    // Log stdout so Python print() output is visible
     if (stdout.trim()) console.log(`[Shell] stdout: ${stdout.trim().slice(0, 500)}`);
     if (stderr.trim()) console.warn(`[Shell] stderr: ${stderr.trim().slice(0, 500)}`);
     return { success: true, stdout: stdout.trim().slice(0, 5000), stderr: stderr.trim().slice(0, 1000) };
@@ -1010,23 +946,18 @@ async function runShellCommand(command: string | undefined): Promise<StepResult>
     const stdoutStr = (e.stdout ?? '').trim();
     const stderrStr = (e.stderr ?? '').trim();
 
-    // Always log the actual error output
     if (stdoutStr) console.log(`[Shell] stdout: ${stdoutStr.slice(0, 500)}`);
     if (stderrStr) console.error(`[Shell] ✗ stderr: ${stderrStr.slice(0, 500)}`);
 
-    // Python/script errors: stderr contains the traceback — surface it as a real failure
     if (stderrStr && (stderrStr.includes('Traceback') || stderrStr.includes('Error:') || stderrStr.includes('error:'))) {
       throw new Error(`Script failed:\n${stderrStr.slice(0, 800)}`);
     }
-
-if (stderrStr) {
+    if (stderrStr) {
       throw new Error(`Command failed (exit ${e.code ?? '?'}):\n${stderrStr.slice(0, 800)}`);
     }
-    // stdout only with non-zero exit — warn but don't fail (some tools do this)
     if (stdoutStr) {
       return { success: true, stdout: stdoutStr, warning: `Non-zero exit code ${e.code}` };
     }
-
     throw new Error(`Shell failed: ${e.message.slice(0, 300)}`);
   }
 }
@@ -1043,9 +974,8 @@ async function createFile(filePath: string | undefined, content: string): Promis
     const store = articleStore;
     for (const tpl of templateVars) {
       const key = tpl.slice(2, -2).trim();
-if (store[key]) {
+      if (store[key]) {
         let val = store[key];
-        // Escape for Python string literals: apostrophes/quotes/newlines break Python syntax
         if ((filePath ?? '').endsWith('.py')) {
           val = val
             .replace(/\\/g, '\\\\')
@@ -1065,12 +995,12 @@ if (store[key]) {
   await fs.mkdir(path.dirname(p), { recursive: true });
   await fs.writeFile(p, resolvedContent, 'utf-8');
   const stat = await fs.stat(p);
-    const isPythonOrScript = p.endsWith('.py') || p.endsWith('.js') || p.endsWith('.sh');
+
+  const isPythonOrScript = p.endsWith('.py') || p.endsWith('.js') || p.endsWith('.sh');
   if (isPythonOrScript && stat.size < 50) {
     throw new Error(
       `createFile: Script "${p}" is only ${stat.size} bytes — ` +
-      `template variables were likely not resolved. ` +
-      `Check that browser_read_page/browser_extract_results ran before this step.`
+      `template variables were likely not resolved.`
     );
   }
   return { success: true, path: p, message: `Created ${p} (${stat.size}B)` };
@@ -1109,8 +1039,11 @@ async function typeText(text: string | undefined): Promise<StepResult> {
     } catch { /* fall through */ }
   }
   if (pageInstance) {
-    try { await pageInstance.keyboard.type(text, { delay: 30 }); return { success: true, message: `Typed via Playwright` }; }
-    catch { /* fall through */ }
+    try {
+      // ── HUMAN TYPING: typeText also uses humanTypeIntoPage ────────────────
+      await humanTypeIntoPage(pageInstance, text);
+      return { success: true, message: `Typed via Playwright (human rhythm)` };
+    } catch { /* fall through */ }
   }
   const tmp = path.join(os.tmpdir(), `nexus-text-${Date.now()}.txt`);
   await fs.writeFile(tmp, text, 'utf-8');
@@ -1123,24 +1056,13 @@ async function setWallpaper(query: string | undefined): Promise<StepResult> {
   let wallpaperPath: string;
   let provider: string;
 
-  // Detect local file path vs search query
-  const isLocalPath =
-    /^[A-Za-z]:[\\\/]/.test(query) ||
-    query.startsWith('\\\\') ||
-    query.startsWith('/');
+  const isLocalPath = /^[A-Za-z]:[\\\/]/.test(query) || query.startsWith('\\\\') || query.startsWith('/');
 
   if (isLocalPath) {
-    // Collapse double-backslashes introduced by JSON escaping (D:\\\\ → D:\)
-    wallpaperPath = query
-      .replace(/\\\\/g, '\\')
-      .replace(/\\\\/g, '\\')
-      .replace(/\//g, '\\');
+    wallpaperPath = query.replace(/\\\\/g, '\\').replace(/\\\\/g, '\\').replace(/\//g, '\\');
     provider = 'local file';
-    try {
-      await fs.access(wallpaperPath);
-    } catch {
-      throw new Error(`Wallpaper file not found: "${wallpaperPath}". Raw query was: "${query}"`);
-    }
+    try { await fs.access(wallpaperPath); }
+    catch { throw new Error(`Wallpaper file not found: "${wallpaperPath}"`); }
   } else {
     wallpaperPath = path.join(os.tmpdir(), `nexus-wallpaper-${Date.now()}.jpg`);
     provider = await fetchWallpaperImage(query, wallpaperPath);
@@ -1151,8 +1073,6 @@ async function setWallpaper(query: string | undefined): Promise<StepResult> {
   try {
     if (platform === 'win32') {
       const scriptPath = path.join(os.tmpdir(), `set-wp-${Date.now()}.ps1`);
-
-      // Use array join instead of template literal to avoid backtick conflicts
       const scriptLines = [
         'param([string]$WallpaperPath)',
         'Add-Type -TypeDefinition @"',
@@ -1171,10 +1091,8 @@ async function setWallpaper(query: string | undefined): Promise<StepResult> {
         'Start-Sleep -Seconds 2',
         'Start-Process explorer.exe',
       ];
-
       await fs.writeFile(scriptPath, scriptLines.join('\n'), 'utf-8');
       try {
-        // Pass path as argument — avoids all escaping issues inside the script body
         await execAsync(
           `powershell -ExecutionPolicy Bypass -File "${scriptPath}" -WallpaperPath "${wallpaperPath}"`,
           { timeout: 20_000 }
@@ -1182,7 +1100,6 @@ async function setWallpaper(query: string | undefined): Promise<StepResult> {
       } finally {
         await fs.unlink(scriptPath).catch(() => {});
       }
-
     } else if (platform === 'darwin') {
       await execAsync(
         `osascript -e 'tell application "Finder" to set desktop picture to POSIX file "${wallpaperPath}"'`,
@@ -1191,26 +1108,15 @@ async function setWallpaper(query: string | undefined): Promise<StepResult> {
     } else {
       for (const cmd of [
         `gsettings set org.gnome.desktop.background picture-uri "file://${wallpaperPath}"`,
-        `gsettings set org.gnome.desktop.background picture-uri-dark "file://${wallpaperPath}"`,
-        `pcmanfm --set-wallpaper "${wallpaperPath}"`,
         `feh --bg-fill "${wallpaperPath}"`,
       ]) {
         try { await execAsync(cmd, { timeout: 8_000 }); break; } catch { /* try next */ }
       }
     }
 
-    return {
-      success: true,
-      message: `✓ Wallpaper set (source: ${provider})`,
-      path: wallpaperPath,
-    };
+    return { success: true, message: `✓ Wallpaper set (source: ${provider})`, path: wallpaperPath };
   } catch (err) {
-    return {
-      success: true,
-      message: `Wallpaper written but refresh may be needed`,
-      path: wallpaperPath,
-      warning: (err as Error).message,
-    };
+    return { success: true, message: `Wallpaper written but refresh may be needed`, path: wallpaperPath, warning: (err as Error).message };
   }
 }
 
@@ -1291,27 +1197,16 @@ async function browserScreenshotAnalyze(
   action: 'click' | 'fill' = 'click',
   value?: string
 ): Promise<StepResult> {
-  if (!targetDescription) {
-    throw new Error('browser_screenshot_analyze requires target_description parameter');
-  }
+  if (!targetDescription) throw new Error('browser_screenshot_analyze requires target_description');
 
   const page = await ensurePlaywright();
-
-  // Take a viewport screenshot (not full page — keeps it fast and under API limits)
   const screenshot = await page.screenshot({ type: 'jpeg', quality: 80, fullPage: false });
   const base64 = screenshot.toString('base64');
 
   const geminiKey = process.env.GEMINI_API_KEY;
   if (!geminiKey || geminiKey === 'your_gemini_api_key_here') {
-    // Graceful fallback: try smartFindAndAct directly without vision
-    console.warn('[Vision] GEMINI_API_KEY not set — falling back to smartFindAndAct directly');
-    console.warn('[Vision] Get a free key at https://aistudio.google.com → Get API Key');
     const result = await smartFindAndAct(page, targetDescription, action, value);
-    return {
-      success: true,
-      message: `Action performed (no vision key — used DOM fallback): "${targetDescription}"`,
-      strategy: result.strategy,
-    };
+    return { success: true, message: `Action performed (no vision key — used DOM fallback)`, strategy: result.strategy };
   }
 
   const geminiModel = process.env.GEMINI_VISION_MODEL ?? 'gemini-1.5-flash';
@@ -1319,17 +1214,9 @@ async function browserScreenshotAnalyze(
 
   const prompt = [
     `I need to ${action === 'fill' ? `fill "${value}" into` : 'click'} the element: "${targetDescription}"`,
-    ``,
-    `Look at this screenshot of a web page and find the CSS selector for that element.`,
-    ``,
-    `Rules:`,
-    `- Prefer id, name, aria-label, placeholder, or data-testid attributes`,
-    `- If unavailable, use a short stable class-based selector`,
-    `- For buttons/links, text content is acceptable`,
-    `- Reply ONLY with a JSON object, no markdown, no explanation`,
-    ``,
-    `{ "found": true, "selector": "CSS selector", "fallbackText": "visible text if selector fragile", "confidence": 0-100 }`,
-    `or if not visible: { "found": false, "reason": "why" }`,
+    `Look at this screenshot and find the CSS selector.`,
+    `Reply ONLY with JSON: { "found": true, "selector": "...", "fallbackText": "...", "confidence": 0-100 }`,
+    `or if not visible: { "found": false, "reason": "..." }`,
   ].join('\n');
 
   let geminiSelector: string | null = null;
@@ -1340,42 +1227,26 @@ async function browserScreenshotAnalyze(
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        contents: [{
-          parts: [
-            { inline_data: { mime_type: 'image/jpeg', data: base64 } },
-            { text: prompt },
-          ],
-        }],
+        contents: [{ parts: [{ inline_data: { mime_type: 'image/jpeg', data: base64 } }, { text: prompt }] }],
         generationConfig: { temperature: 0.1, maxOutputTokens: 200 },
       }),
     });
 
-    if (!response.ok) {
-      throw new Error(`Gemini API ${response.status}: ${await response.text()}`);
-    }
-
-    const data = await response.json() as {
-      candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
-    };
-
-    const rawText = data.candidates?.[0]?.content?.parts?.[0]?.text ?? '';
-    const cleaned = rawText.replace(/^```(?:json)?\n?/m, '').replace(/\n?```$/m, '').trim();
-    const parsed = JSON.parse(cleaned);
-
-    if (parsed.found && parsed.selector) {
-      geminiSelector = parsed.selector;
-      fallbackText = parsed.fallbackText ?? null;
-      console.log(`[Vision] Gemini returned selector: "${geminiSelector}" (confidence: ${parsed.confidence}%)`);
-    } else {
-      console.warn(`[Vision] Gemini could not find element: ${parsed.reason}`);
+    if (response.ok) {
+      const data = await response.json() as { candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }> };
+      const rawText = data.candidates?.[0]?.content?.parts?.[0]?.text ?? '';
+      const cleaned = rawText.replace(/^```(?:json)?\n?/m, '').replace(/\n?```$/m, '').trim();
+      const parsed = JSON.parse(cleaned);
+      if (parsed.found && parsed.selector) {
+        geminiSelector = parsed.selector;
+        fallbackText = parsed.fallbackText ?? null;
+      }
     }
   } catch (e) {
     console.warn('[Vision] Gemini call failed:', (e as Error).message);
   }
 
-  // Try Gemini selector first, then fallback text, then original description
   const selectorToTry = geminiSelector ?? fallbackText ?? targetDescription;
-
   const result = await smartFindAndAct(page, selectorToTry, action, value);
 
   return {
@@ -1386,82 +1257,24 @@ async function browserScreenshotAnalyze(
 }
 
 async function browserTakeScreenshot(savePath?: string): Promise<StepResult> {
-  // ── Step 1: Get live page ───────────────────────────────────────────────────
   const page = await ensurePlaywright();
-
-  if (!await isPageAlive(page)) {
-    throw new Error('browser_screenshot: No live browser page — open a URL first');
-  }
-
-  // ── Step 2: Resolve destination path ────────────────────────────────────────
-  //
-  // resolvePath() already handles ~, /Users/..., /home/... → converts to
-  // absolute path using os.homedir(). Falls back to Desktop if no path given.
+  if (!await isPageAlive(page)) throw new Error('browser_screenshot: No live browser page');
 
   const dest = savePath
     ? resolvePath(savePath)
     : path.join(os.homedir(), 'Desktop', `nexus-screenshot-${Date.now()}.png`);
 
-  console.log(`[browser_screenshot] Saving to: ${dest}`);
-
-  // ── Step 3: Ensure directory exists ─────────────────────────────────────────
-  try {
-    await fs.mkdir(path.dirname(dest), { recursive: true });
-  } catch (mkdirErr) {
-    throw new Error(
-      `browser_screenshot: Cannot create directory "${path.dirname(dest)}": ${(mkdirErr as Error).message}`
-    );
-  }
-
-  // ── Step 4: Take the screenshot ─────────────────────────────────────────────
-  //
-  // Playwright's page.screenshot() throws on failure — we let it propagate
-  // so the retry loop in executeAllSteps() catches it and retries the step.
-
-  try {
-    await page.screenshot({
-      path: dest,
-      fullPage: false,   // viewport only — faster, smaller file
-      type: 'png',
-    });
-  } catch (screenshotErr) {
-    throw new Error(
-      `browser_screenshot: Playwright screenshot failed — ${(screenshotErr as Error).message}`
-    );
-  }
-
-  // ── Step 5: Verify the file was actually written ────────────────────────────
-  //
-  // This is the KEY fix. Without this check, Playwright can silently fail to
-  // write (permissions, path too long on Windows, disk full) and the old code
-  // would still return success:true.
+  await fs.mkdir(path.dirname(dest), { recursive: true });
+  await page.screenshot({ path: dest, fullPage: false, type: 'png' });
 
   let fileStat: import('fs').Stats;
-  try {
-    fileStat = await fs.stat(dest);
-  } catch {
-    throw new Error(
-      `browser_screenshot: Screenshot command ran but file was NOT created at "${dest}". ` +
-      `Check write permissions and that the path is valid.`
-    );
-  }
+  try { fileStat = await fs.stat(dest); }
+  catch { throw new Error(`browser_screenshot: File was NOT created at "${dest}"`); }
 
   if (fileStat.size < 1000) {
-    // A valid PNG is always > 1KB. A 0-byte or tiny file means something went wrong.
-    await fs.unlink(dest).catch(() => {}); // clean up the broken file
-    throw new Error(
-      `browser_screenshot: File was created but appears corrupt (${fileStat.size} bytes). ` +
-      `Expected a valid PNG > 1KB.`
-    );
+    await fs.unlink(dest).catch(() => {});
+    throw new Error(`browser_screenshot: File appears corrupt (${fileStat.size} bytes)`);
   }
 
-  // ── Step 6: Return success with verified path ────────────────────────────────
-  const sizeKB = Math.round(fileStat.size / 1024);
-  console.log(`[browser_screenshot] ✓ Screenshot saved: ${dest} (${sizeKB}KB)`);
-
-  return {
-    success: true,
-    path: dest,
-    message: `Screenshot saved to ${dest} (${sizeKB}KB)`,
-  };
+  return { success: true, path: dest, message: `Screenshot saved to ${dest} (${Math.round(fileStat.size / 1024)}KB)` };
 }
