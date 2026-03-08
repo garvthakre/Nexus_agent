@@ -18,11 +18,16 @@
  *   MEMORY TIER (Tier -1) — selectorMemory integration
  *   FIX 2A — Progressive waits between tier escalations
  *   FIX 2B — Groq selector validation in Tier 2/3
+ *
+ * Human Typing:
+ *   All fill() calls replaced with humanType() for visible character-by-character
+ *   typing with randomised per-keystroke delay (40–90ms).
  * ─────────────────────────────────────────────────────────────────────────────
  */
 
 import OpenAI from 'openai';
 import { recordSuccess, recordFailure, getBestSelector } from '../utils/selectorMemory';
+import { humanType, humanDelay, sleep } from '../utils/humanTyping';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -389,6 +394,8 @@ async function validateElementExists(
       `[aria-label*="${name}" i]`,
       `[placeholder*="${name}" i]`,
       `[title*="${name}" i]`,
+            `[name="${name}"]`,
+      `[name*="${name}" i]`,
       `button`,
       `input`,
       `a[href]`,
@@ -403,7 +410,8 @@ async function validateElementExists(
           const label = (el.getAttribute('aria-label') ?? '').toLowerCase();
           const placeholder = (el.getAttribute('placeholder') ?? '').toLowerCase();
           const nameLower = name.toLowerCase();
-          if (text.includes(nameLower) || label.includes(nameLower) || placeholder.includes(nameLower)) {
+          const nameAttr = (el.getAttribute('name') ?? '').toLowerCase();
+          if (text.includes(nameLower) || label.includes(nameLower) || placeholder.includes(nameLower) || nameAttr === nameLower || nameAttr.includes(nameLower)) {
             return true;
           }
         }
@@ -550,8 +558,8 @@ async function tier1FuzzyDomScan(
     await loc.waitFor({ state: 'visible', timeout: 3000 });
 
     if (action === 'fill' && value !== undefined) {
-      await loc.click({ timeout: 2000 });
-      await loc.fill(value, { timeout: 3000 });
+      // ── HUMAN TYPING: replaced loc.fill() with humanType() ──
+      await humanType(loc, value);
     } else {
       await loc.click({ timeout: 2000 });
     }
@@ -576,7 +584,7 @@ async function tier1FuzzyDomScan(
   return null;
 }
 
-// ─── Tier 2: Accessibility Tree + Groq (with FIX 2B validation) ──────────────
+// ─── Tier 2: Accessibility Tree + Groq ───────────────────────────────────────
 
 async function tier2AccessibilityGroq(
   page: import('playwright').Page,
@@ -633,7 +641,6 @@ ${a11yTree}`;
 
   console.log(`[Tier 2] Groq identified: role="${parsed.elementRole}" name="${parsed.elementName}"`);
 
-  // FIX 2B: Validate element actually exists before attempting interaction
   const elementExists = await validateElementExists(page, parsed.elementName);
   if (!elementExists) {
     console.log(`[Tier 2] ⚠ Element "${parsed.elementName}" not found in DOM — Groq may have hallucinated. Skipping.`);
@@ -654,8 +661,8 @@ ${a11yTree}`;
       await loc.waitFor({ state: 'visible', timeout: 2000 });
 
       if (action === 'fill' && value !== undefined) {
-        await loc.click({ timeout: 2000 });
-        await loc.fill(value, { timeout: 3000 });
+        // ── HUMAN TYPING: replaced loc.fill() with humanType() ──
+        await humanType(loc, value);
       } else {
         await loc.click({ timeout: 2000 });
       }
@@ -750,7 +757,6 @@ ${html.slice(0, 2000)}`;
 
   console.log(`[Tier 3] Groq approach="${parsed.approach}" reasoning="${parsed.reasoning}"`);
 
-  // FIX 2B applied to Tier 3: validate selector exists before using it
   if (parsed.approach === 'selector' && parsed.selector) {
     const selectorExists = await page.locator(parsed.selector).count().then(c => c > 0).catch(() => false);
     if (!selectorExists) {
@@ -765,8 +771,12 @@ ${html.slice(0, 2000)}`;
         if (!parsed.selector) return null;
         const loc = page.locator(parsed.selector).first();
         await loc.waitFor({ state: 'visible', timeout: 3000 });
-        if (action === 'fill' && value) { await loc.click(); await loc.fill(value); }
-        else await loc.click({ timeout: 2000 });
+        if (action === 'fill' && value) {
+          // ── HUMAN TYPING: replaced loc.fill() with humanType() ──
+          await humanType(loc, value);
+        } else {
+          await loc.click({ timeout: 2000 });
+        }
         console.log(`[Tier 3] ✓ selector: "${parsed.selector}"`);
         return { success: true, strategy: `replan-selector:${parsed.selector}`, tier: 3 };
       }
@@ -775,8 +785,12 @@ ${html.slice(0, 2000)}`;
         if (!parsed.text) return null;
         const loc = page.getByText(parsed.text, { exact: false }).first();
         await loc.waitFor({ state: 'visible', timeout: 3000 });
-        if (action === 'fill' && value) { await loc.click(); await loc.fill(value); }
-        else await loc.click({ timeout: 2000 });
+        if (action === 'fill' && value) {
+          // ── HUMAN TYPING: replaced loc.fill() with humanType() ──
+          await humanType(loc, value);
+        } else {
+          await loc.click({ timeout: 2000 });
+        }
         console.log(`[Tier 3] ✓ text: "${parsed.text}"`);
         return { success: true, strategy: `replan-text:${parsed.text}`, tier: 3 };
       }
@@ -785,8 +799,12 @@ ${html.slice(0, 2000)}`;
         if (!parsed.name) return null;
         const loc = page.getByRole((parsed.role ?? 'button') as 'button', { name: parsed.name, exact: false }).first();
         await loc.waitFor({ state: 'visible', timeout: 3000 });
-        if (action === 'fill' && value) { await loc.click(); await loc.fill(value); }
-        else await loc.click({ timeout: 2000 });
+        if (action === 'fill' && value) {
+          // ── HUMAN TYPING: replaced loc.fill() with humanType() ──
+          await humanType(loc, value);
+        } else {
+          await loc.click({ timeout: 2000 });
+        }
         console.log(`[Tier 3] ✓ role="${parsed.role}" name="${parsed.name}"`);
         return { success: true, strategy: `replan-role:${parsed.role}[${parsed.name}]`, tier: 3 };
       }
@@ -871,11 +889,9 @@ async function tier5VisionGemini(
   const geminiKey = process.env.GEMINI_API_KEY;
   if (!geminiKey || geminiKey === 'your_gemini_api_key_here') {
     console.log('[Tier 5] GEMINI_API_KEY not set — skipping vision fallback.');
-    console.log('[Tier 5] Get a free key at https://aistudio.google.com → Get API Key');
     return null;
   }
 
-  // Take a viewport screenshot (not full page — keeps image small and fast)
   let screenshotBase64: string;
   try {
     const buffer = await page.screenshot({ type: 'jpeg', quality: 75, fullPage: false });
@@ -886,37 +902,25 @@ async function tier5VisionGemini(
     return null;
   }
 
-  // Build the prompt — ask Gemini for a CSS selector AND a backup text label
   const actionDescription = action === 'fill'
     ? `fill "${value}" into`
     : 'click';
 
   const prompt = [
     `I need to ${actionDescription} the element described as: "${hint}"`,
-    ``,
     `Look at this screenshot of a web page.`,
     `Find the element and return the best CSS selector to target it.`,
-    ``,
     `Rules:`,
     `- Prefer selectors using id, name, aria-label, placeholder, or data-testid attributes`,
     `- If those are not available, use a short class-based selector`,
     `- If the element is a button or link, you can use text content`,
     `- Return ONLY a JSON object, no explanation, no markdown`,
-    ``,
     `Schema:`,
-    `{`,
-    `  "found": true,`,
-    `  "selector": "CSS selector string",`,
-    `  "fallbackText": "visible text on the element if selector might be fragile",`,
-    `  "confidence": 0-100,`,
-    `  "reasoning": "one sentence"`,
-    `}`,
-    ``,
+    `{ "found": true, "selector": "CSS selector string", "fallbackText": "visible text on the element if selector might be fragile", "confidence": 0-100, "reasoning": "one sentence" }`,
     `If the element is not visible in the screenshot:`,
     `{ "found": false, "reasoning": "why not visible" }`,
   ].join('\n');
 
-  // Call Gemini Vision API
   let geminiResponse: { found: boolean; selector?: string; fallbackText?: string; confidence?: number; reasoning?: string };
 
   try {
@@ -926,21 +930,11 @@ async function tier5VisionGemini(
     const body = {
       contents: [{
         parts: [
-          {
-            inline_data: {
-              mime_type: 'image/jpeg',
-              data: screenshotBase64,
-            },
-          },
-          {
-            text: prompt,
-          },
+          { inline_data: { mime_type: 'image/jpeg', data: screenshotBase64 } },
+          { text: prompt },
         ],
       }],
-      generationConfig: {
-        temperature: 0.1,
-        maxOutputTokens: 300,
-      },
+      generationConfig: { temperature: 0.1, maxOutputTokens: 300 },
     };
 
     const response = await fetch(apiUrl, {
@@ -956,22 +950,15 @@ async function tier5VisionGemini(
     }
 
     const data = await response.json() as {
-      candidates?: Array<{
-        content?: { parts?: Array<{ text?: string }> };
-      }>;
+      candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
     };
 
     const rawText = data.candidates?.[0]?.content?.parts?.[0]?.text ?? '';
-    if (!rawText) {
-      console.warn('[Tier 5] Gemini returned empty response');
-      return null;
-    }
+    if (!rawText) { console.warn('[Tier 5] Gemini returned empty response'); return null; }
 
-    // Strip markdown fences if Gemini wrapped the JSON
     const cleaned = rawText.replace(/^```(?:json)?\n?/m, '').replace(/\n?```$/m, '').trim();
     geminiResponse = JSON.parse(cleaned);
-
-    console.log(`[Tier 5] Gemini response: found=${geminiResponse.found} confidence=${geminiResponse.confidence}% reasoning="${geminiResponse.reasoning}"`);
+    console.log(`[Tier 5] Gemini response: found=${geminiResponse.found} confidence=${geminiResponse.confidence}%`);
 
   } catch (e) {
     console.warn('[Tier 5] Gemini call failed:', (e as Error).message);
@@ -983,32 +970,23 @@ async function tier5VisionGemini(
     return null;
   }
 
-  // Validate the Gemini selector exists in the DOM before trusting it
   const selectorExists = await page.locator(geminiResponse.selector).count()
-    .then(c => c > 0)
-    .catch(() => false);
+    .then(c => c > 0).catch(() => false);
 
   if (!selectorExists) {
     console.log(`[Tier 5] ⚠ Gemini selector "${geminiResponse.selector}" not found in DOM.`);
 
-    // Try fallback text if available
     if (geminiResponse.fallbackText) {
-      console.log(`[Tier 5] Trying fallback text: "${geminiResponse.fallbackText}"`);
       try {
         const loc = page.getByText(geminiResponse.fallbackText, { exact: false }).first();
         await loc.waitFor({ state: 'visible', timeout: 2000 });
         if (action === 'fill' && value) {
-          await loc.click({ timeout: 2000 });
-          await loc.fill(value, { timeout: 3000 });
+          // ── HUMAN TYPING ──
+          await humanType(loc, value);
         } else {
           await loc.click({ timeout: 2000 });
         }
-        console.log(`[Tier 5] ✓ Success via vision fallback text: "${geminiResponse.fallbackText}"`);
-        return {
-          success: true,
-          strategy: `vision-text:${geminiResponse.fallbackText}`,
-          tier: 5,
-        };
+        return { success: true, strategy: `vision-text:${geminiResponse.fallbackText}`, tier: 5 };
       } catch {
         console.log('[Tier 5] Fallback text also failed');
       }
@@ -1016,28 +994,22 @@ async function tier5VisionGemini(
     return null;
   }
 
-  // Try the Gemini-suggested selector
   try {
     const loc = page.locator(geminiResponse.selector).first();
     await loc.waitFor({ state: 'visible', timeout: 3000 });
 
     if (action === 'fill' && value !== undefined) {
-      await loc.click({ timeout: 2000 });
-      await loc.fill(value, { timeout: 3000 });
+      // ── HUMAN TYPING: replaced loc.fill() with humanType() ──
+      await humanType(loc, value);
     } else {
       await loc.click({ timeout: 2000 });
     }
 
-    console.log(`[Tier 5] ✓ Vision success: "${geminiResponse.selector}" (confidence: ${geminiResponse.confidence}%)`);
-    return {
-      success: true,
-      strategy: `vision:${geminiResponse.selector}`,
-      tier: 5,
-    };
+    console.log(`[Tier 5] ✓ Vision success: "${geminiResponse.selector}"`);
+    return { success: true, strategy: `vision:${geminiResponse.selector}`, tier: 5 };
   } catch (e) {
     console.warn('[Tier 5] Gemini selector interaction failed:', (e as Error).message);
 
-    // Last attempt: JavaScript click directly
     try {
       const jsClicked = await page.evaluate((sel: string) => {
         const el = document.querySelector(sel) as HTMLElement | null;
@@ -1046,12 +1018,7 @@ async function tier5VisionGemini(
       }, geminiResponse.selector);
 
       if (jsClicked) {
-        console.log(`[Tier 5] ✓ Vision JS click succeeded: "${geminiResponse.selector}"`);
-        return {
-          success: true,
-          strategy: `vision-js:${geminiResponse.selector}`,
-          tier: 5,
-        };
+        return { success: true, strategy: `vision-js:${geminiResponse.selector}`, tier: 5 };
       }
     } catch { /* give up */ }
   }
@@ -1109,9 +1076,12 @@ async function tier0Direct(
     }
   }
 
-  if (hint.match(/^[#.\[a-z]/i) && !hint.includes('h3:nth-child')) {
-    candidates.push({ label: `css:${hint}`, loc: page.locator(hint).first() });
-  }
+if (!hint.includes('h3:nth-child')) {
+  try {
+    await page.waitForSelector(hint, { state: 'visible', timeout: 4000 });
+    candidates.unshift({ label: `css:${hint}`, loc: page.locator(hint).first() });
+  } catch { /* not a valid selector or not present */ }
+}
 
   if (!hint.includes('h3')) {
     candidates.push(
@@ -1127,8 +1097,8 @@ async function tier0Direct(
     try {
       await loc.waitFor({ state: 'visible', timeout: 2000 });
       if (action === 'fill' && value !== undefined) {
-        await loc.click({ timeout: 1500 });
-        await loc.fill(value, { timeout: 2000 });
+        // ── HUMAN TYPING: replaced loc.fill() with humanType() ──
+        await humanType(loc, value);
       } else {
         await loc.click({ timeout: 1500 });
       }
@@ -1158,7 +1128,6 @@ export async function smartFindAndAct(
 ): Promise<ActionResult> {
   console.log(`\n[SmartBrowser] ${action.toUpperCase()} — hint: "${hint.slice(0, 60)}" ${value ? `value: "${value}"` : ''}`);
 
-  // Check if page is still alive
   try {
     await page.evaluate(() => true);
   } catch {
@@ -1180,8 +1149,8 @@ export async function smartFindAndAct(
       await loc.waitFor({ state: 'visible', timeout: 2000 });
 
       if (action === 'fill' && value !== undefined) {
-        await loc.click({ timeout: 1500 });
-        await loc.fill(value, { timeout: 2000 });
+        // ── HUMAN TYPING: replaced loc.fill() with humanType() ──
+        await humanType(loc, value);
       } else {
         await loc.click({ timeout: 1500 });
       }
@@ -1196,50 +1165,34 @@ export async function smartFindAndAct(
     }
   }
 
-  // ── Site-specific handlers (highest priority after memory) ───────────────
+  // ── Site-specific handlers ────────────────────────────────────────────────
 
   if (action === 'click') {
     const googleResult = await handleGoogleSearchClick(page, hint);
-    if (googleResult) {
-      await recordSuccess(pageUrl, hint, googleResult.strategy, googleResult.tier);
-      return googleResult;
-    }
+    if (googleResult) { await recordSuccess(pageUrl, hint, googleResult.strategy, googleResult.tier); return googleResult; }
   }
 
   if (action === 'click' && page.url().includes('bing.com')) {
     const bingResult = await handleBingClick(page, hint);
-    if (bingResult) {
-      await recordSuccess(pageUrl, hint, bingResult.strategy, bingResult.tier);
-      return bingResult;
-    }
+    if (bingResult) { await recordSuccess(pageUrl, hint, bingResult.strategy, bingResult.tier); return bingResult; }
   }
 
   if (action === 'click' && page.url().includes('linkedin.com')) {
     const linkedinResult = await handleLinkedInClick(page, hint);
-    if (linkedinResult) {
-      await recordSuccess(pageUrl, hint, linkedinResult.strategy, linkedinResult.tier);
-      return linkedinResult;
-    }
+    if (linkedinResult) { await recordSuccess(pageUrl, hint, linkedinResult.strategy, linkedinResult.tier); return linkedinResult; }
   }
 
-  // ── Tier 0: Direct selector / common roles ───────────────────────────────
+  // ── Tier 0 ────────────────────────────────────────────────────────────────
   const t0 = await tier0Direct(page, hint, action, value);
-  if (t0) {
-    await recordSuccess(pageUrl, hint, t0.strategy, t0.tier);
-    return t0;
-  }
+  if (t0) { await recordSuccess(pageUrl, hint, t0.strategy, t0.tier); return t0; }
 
-  // ── FIX 2A: Progressive wait before Tier 1 ───────────────────────────────
   console.log('[SmartBrowser] Tier 0 failed — waiting 1.5s for DOM to settle...');
   await sleep(1500);
   await page.waitForLoadState('domcontentloaded').catch(() => {});
 
   // ── Tier 1: DOM fuzzy scan ────────────────────────────────────────────────
   const t1 = await tier1FuzzyDomScan(page, hint, action, value);
-  if (t1) {
-    await recordSuccess(pageUrl, hint, t1.strategy, t1.tier);
-    return t1;
-  }
+  if (t1) { await recordSuccess(pageUrl, hint, t1.strategy, t1.tier); return t1; }
 
   // ── FIX 2A: Progressive wait before Tier 2 ───────────────────────────────
   console.log('[SmartBrowser] Tier 1 failed — waiting for network to settle...');
@@ -1248,10 +1201,7 @@ export async function smartFindAndAct(
 
   // ── Tier 2: Accessibility tree + Groq ────────────────────────────────────
   const t2 = await tier2AccessibilityGroq(page, hint, action, value);
-  if (t2) {
-    await recordSuccess(pageUrl, hint, t2.strategy, t2.tier);
-    return t2;
-  }
+  if (t2) { await recordSuccess(pageUrl, hint, t2.strategy, t2.tier); return t2; }
 
   // ── FIX 2A: Minimal wait before Tier 3 ───────────────────────────────────
   console.log('[SmartBrowser] Tier 2 failed — full HTML replan...');
@@ -1259,39 +1209,23 @@ export async function smartFindAndAct(
 
   // ── Tier 3: HTML context + Groq re-plan ──────────────────────────────────
   const t3 = await tier3HtmlGroqReplan(page, hint, action, value);
-  if (t3) {
-    await recordSuccess(pageUrl, hint, t3.strategy, t3.tier);
-    return t3;
-  }
+  if (t3) { await recordSuccess(pageUrl, hint, t3.strategy, t3.tier); return t3; }
 
   // ── Tier 4: URL param fallback ────────────────────────────────────────────
   if (action === 'click') {
     console.log('[SmartBrowser] Tier 3 failed — escalating to Tier 4');
     const t4 = await tier4UrlFallback(page, hint);
-    if (t4) {
-      await recordSuccess(pageUrl, hint, t4.strategy, t4.tier);
-      return t4;
-    }
+    if (t4) { await recordSuccess(pageUrl, hint, t4.strategy, t4.tier); return t4; }
   }
 
   // ── Tier 5: Vision fallback (Gemini Flash) — WEEK 3 ──────────────────────
   console.log('[SmartBrowser] Tier 4 failed — escalating to Tier 5 (Vision/Gemini)');
   const t5 = await tier5VisionGemini(page, hint, action, value);
-  if (t5) {
-    await recordSuccess(pageUrl, hint, t5.strategy, t5.tier);
-    return t5;
-  }
+  if (t5) { await recordSuccess(pageUrl, hint, t5.strategy, t5.tier); return t5; }
 
   const currentUrl = page.url();
   throw new Error(
     `All tiers failed for "${hint}" (${action}) on ${currentUrl}.\n` +
-    `Tried: memory → direct selector → DOM settle + fuzzy scan → networkidle + accessibility+Groq → HTML+Groq replan → URL fallback → Vision/Gemini.\n` +
-    `If GEMINI_API_KEY is not set, get a free key at https://aistudio.google.com to enable Vision Tier 5.`
+    `Tried: memory → direct selector → DOM settle + fuzzy scan → networkidle + accessibility+Groq → HTML+Groq replan → URL fallback → Vision/Gemini.`
   );
-}
-
-// ─── Utility ──────────────────────────────────────────────────────────────────
-
-function sleep(ms: number): Promise<void> {
-  return new Promise(r => setTimeout(r, ms));
 }
