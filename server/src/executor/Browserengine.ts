@@ -559,7 +559,7 @@ async function tier1FuzzyDomScan(
 
     if (action === 'fill' && value !== undefined) {
       // ── HUMAN TYPING: replaced loc.fill() with humanType() ──
-      await humanType(loc, value);
+       await humanType(loc, value, page);
     } else {
       await loc.click({ timeout: 2000 });
     }
@@ -662,7 +662,7 @@ ${a11yTree}`;
 
       if (action === 'fill' && value !== undefined) {
         // ── HUMAN TYPING: replaced loc.fill() with humanType() ──
-        await humanType(loc, value);
+         await humanType(loc, value, page);
       } else {
         await loc.click({ timeout: 2000 });
       }
@@ -773,7 +773,7 @@ ${html.slice(0, 2000)}`;
         await loc.waitFor({ state: 'visible', timeout: 3000 });
         if (action === 'fill' && value) {
           // ── HUMAN TYPING: replaced loc.fill() with humanType() ──
-          await humanType(loc, value);
+           await humanType(loc, value, page);
         } else {
           await loc.click({ timeout: 2000 });
         }
@@ -787,7 +787,7 @@ ${html.slice(0, 2000)}`;
         await loc.waitFor({ state: 'visible', timeout: 3000 });
         if (action === 'fill' && value) {
           // ── HUMAN TYPING: replaced loc.fill() with humanType() ──
-          await humanType(loc, value);
+           await humanType(loc, value, page);
         } else {
           await loc.click({ timeout: 2000 });
         }
@@ -801,7 +801,7 @@ ${html.slice(0, 2000)}`;
         await loc.waitFor({ state: 'visible', timeout: 3000 });
         if (action === 'fill' && value) {
           // ── HUMAN TYPING: replaced loc.fill() with humanType() ──
-          await humanType(loc, value);
+           await humanType(loc, value, page);
         } else {
           await loc.click({ timeout: 2000 });
         }
@@ -982,7 +982,7 @@ async function tier5VisionGemini(
         await loc.waitFor({ state: 'visible', timeout: 2000 });
         if (action === 'fill' && value) {
           // ── HUMAN TYPING ──
-          await humanType(loc, value);
+           await humanType(loc, value, page);
         } else {
           await loc.click({ timeout: 2000 });
         }
@@ -1000,7 +1000,7 @@ async function tier5VisionGemini(
 
     if (action === 'fill' && value !== undefined) {
       // ── HUMAN TYPING: replaced loc.fill() with humanType() ──
-      await humanType(loc, value);
+       await humanType(loc, value, page);
     } else {
       await loc.click({ timeout: 2000 });
     }
@@ -1098,7 +1098,7 @@ if (!hint.includes('h3:nth-child')) {
       await loc.waitFor({ state: 'visible', timeout: 2000 });
       if (action === 'fill' && value !== undefined) {
         // ── HUMAN TYPING: replaced loc.fill() with humanType() ──
-        await humanType(loc, value);
+         await humanType(loc, value, page);
       } else {
         await loc.click({ timeout: 1500 });
       }
@@ -1150,7 +1150,7 @@ export async function smartFindAndAct(
 
       if (action === 'fill' && value !== undefined) {
         // ── HUMAN TYPING: replaced loc.fill() with humanType() ──
-        await humanType(loc, value);
+         await humanType(loc, value, page);
       } else {
         await loc.click({ timeout: 1500 });
       }
