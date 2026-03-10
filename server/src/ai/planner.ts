@@ -31,15 +31,22 @@ DECISION RULE for "open X":
   X has a web version AND user did NOT say "app"?      → MODEL A
   X is a file editor?  → MODEL B: create_file then run_shell_command "code <path>"
 
-CRITICAL — APP vs WEB OVERRIDE:
-  If user message contains "app", "application", "desktop", or "installed",
-  ALWAYS prefer open_application over browser_open for that app.
-
+CRITICAL — NEVER use open_application for browsers (Chrome, Edge, Firefox, Safari):
+  "open Chrome and search X"  → ONE step: browser_open { url: "https://www.bing.com/search?q=X" }
+  "open Edge and go to X"     → ONE step: browser_open { url: "X" }
+  browser_open already launches Chrome. open_application + browser_open = two windows. BANNED.
 ═══════════════════════════════════════════════
 APP ROUTING TABLE
 ═══════════════════════════════════════════════
 
-Spotify           → browser_open "https://open.spotify.com/search"
+Spotify search + play song:
+  browser_open "https://open.spotify.com/search/<encoded-query>/tracks"
+  browser_click { selector: "[data-testid='tracklist-row']" }
+  NEVER use browser_fill on Spotify search box — use URL directly
+  NEVER use [data-testid='track-row'] — correct selector is [data-testid='tracklist-row']
+
+Spotify open only:
+  browser_open "https://open.spotify.com"
                     UNLESS user says "app" → MODEL D
 YouTube / YT Music→ browser_open "https://www.youtube.com/results?search_query=<encoded>"
                     UNLESS user says "app" → MODEL D
@@ -178,6 +185,53 @@ elif sys.platform == 'darwin':
 print('Saved:', path)
 
 ═══════════════════════════════════════════════
+LINKEDIN JOBS EXCEL PATTERN — CRITICAL
+═══════════════════════════════════════════════
+
+Use this EXACT pattern for ALL LinkedIn job search tasks:
+
+  1. browser_open "https://www.linkedin.com/jobs/search?keywords=<role>&location=<city>"
+  2. browser_extract_results { variable_name: "jobs", count: 5 }
+  3. browser_open {{jobs_0_url}}
+  4. browser_read_page { variable_name: "job1", topic: "<role>" }
+  5. browser_open {{jobs_1_url}}
+  6. browser_read_page { variable_name: "job2", topic: "<role>" }
+  7. browser_open {{jobs_2_url}}
+  8. browser_read_page { variable_name: "job3", topic: "<role>" }
+  9. create_file { path: "Desktop/make_excel.py", content: "..." }
+ 10. run_shell_command { command: "python ~/Desktop/make_excel.py" }
+
+In the Python script use: {{jobs_0_title}}, {{job1}}, {{jobs_1_title}}, {{job2}} etc
+
+⚠ CRITICAL LinkedIn rules:
+  - NEVER add browser_wait_for_element for LinkedIn — skip directly to browser_extract_results
+  - NEVER use {{results_0_url}} for LinkedIn jobs — ALWAYS use {{jobs_0_url}}, {{jobs_1_url}} etc
+  - NEVER use .jobs-search-results-list — that selector does not exist on LinkedIn
+  - browser_extract_results already waits for cards — no extra wait step needed
+  - Individual job pages: use waitUntil domcontentloaded (handled automatically)
+
+═══════════════════════════════════════════════
+WHATSAPP RULES — CRITICAL
+═══════════════════════════════════════════════
+
+NEVER use browser_open for WhatsApp tasks.
+WhatsApp Web blocks automation. ALWAYS use whatsapp_send directly.
+
+"send a WhatsApp to X saying Y":
+  Step 1: whatsapp_send { contact: "X", message: "Y" }
+
+"open WhatsApp and message X":
+  Step 1: whatsapp_send { contact: "X", message: "..." }
+
+"check my WhatsApp chats":
+  Step 1: whatsapp_get_chats { limit: 10 }
+
+whatsapp_send    { contact: "exact name", message: "text to send" }
+whatsapp_get_chats { limit?: number }
+
+NEVER generate browser_open "https://web.whatsapp.com" — it will always fail.
+
+═══════════════════════════════════════════════
 EXTRACT-THEN-NAVIGATE PATTERN
 ═══════════════════════════════════════════════
 
@@ -249,6 +303,8 @@ browser_get_page_state (no params)
 run_shell_command      { command }
 create_file            { path, content }
 create_folder          { path }
+whatsapp_send        { contact, message }
+whatsapp_get_chats   { limit? }
 
 ⚠ CRITICAL — create_file RULES:
   - "content" MUST be the COMPLETE, WORKING file content — never empty, never a placeholder
@@ -268,20 +324,19 @@ SPA LOADING RULES — CRITICAL
 ═══════════════════════════════════════════════
 
 The following sites are Single Page Applications (React/Vue).
-After browser_open on these sites, ALWAYS add a browser_wait_for_element step:
+After browser_open on these sites, ALWAYS add a browser_wait_for_element step
+EXCEPT LinkedIn — see LinkedIn rules above.
 
-  LinkedIn    → wait for ".jobs-search-results-list" or ".feed-shared-update-v2"
   Spotify     → wait for "[data-testid='search-input']"
   Discord     → wait for "[class*='channelName']"
   WhatsApp    → wait for "[data-testid='chat-list']"
   YouTube     → wait for "ytd-video-renderer" after search
 
-EXAMPLE PATTERN for LinkedIn:
-  Step 1: browser_open linkedin.com/jobs/search?...
-  Step 2: browser_wait_for_element ".jobs-search-results-list" seconds=10
-  Step 3: browser_extract_results ...
+LINKEDIN EXCEPTION — do NOT add any wait step for LinkedIn jobs.
+  browser_extract_results handles its own internal wait for job cards.
+  Adding browser_wait_for_element for LinkedIn will ALWAYS fail and cause infinite replanning.
 
-NEVER use browser_extract_results immediately after browser_open on an SPA.
+NEVER use browser_extract_results immediately after browser_open on SPAs (except LinkedIn).
 
 ═══════════════════════════════════════════════
 PAGE STATE VERIFICATION — USE FOR RESEARCH TASKS
@@ -469,7 +524,7 @@ const VALID_CAPABILITIES: Capability[] = [
   'browser_open', 'browser_fill', 'browser_click', 'browser_read_page', 'browser_extract_results',
   'browser_wait_for_element', 'browser_get_page_state','browser_screenshot',
   'type_text', 'create_file', 'create_folder', 'wait', 'download_file',
-  'app_find_window', 'app_focus_window', 'app_click', 'app_type',
+  'app_find_window', 'app_focus_window', 'app_click', 'app_type','whatsapp_send', 'whatsapp_get_chats',
 ];
 
 function validatePlan(raw: string): Plan {
@@ -521,6 +576,41 @@ function validatePlan(raw: string): Plan {
   });
 
   if (plan.confidence == null) plan.confidence = 85;
+
+  // ── Auto-remove open_application for browsers — causes double window problem
+  // browser_open already launches Chrome/Edge, so open_application is redundant
+  const BROWSER_NAMES = ['chrome', 'edge', 'firefox', 'safari', 'browser', 'google chrome', 'microsoft edge'];
+  const hadBrowserOpen = plan.steps.some(s => s.capability === 'open_application' &&
+    BROWSER_NAMES.some(b => (s.parameters?.app_name ?? '').toLowerCase().includes(b)));
+  if (hadBrowserOpen) {
+    console.log('[Planner] Auto-removing open_application for browser — browser_open handles launch');
+    plan.steps = plan.steps.filter(s => !(
+      s.capability === 'open_application' &&
+      BROWSER_NAMES.some(b => (s.parameters?.app_name ?? '').toLowerCase().includes(b))
+    ));
+    plan.steps.forEach((s, i) => s.step_number = i + 1);
+  }
+
+  // ── Auto-remove bad LinkedIn wait steps — .jobs-search-results-list never exists.
+  // browser_extract_results has its own internal wait for LinkedIn job cards.
+  // Keeping this step causes infinite replanning loops.
+  const BANNED_LINKEDIN_SELECTORS = [
+    'jobs-search-results-list',
+    'jobs-search-results__list',
+  ];
+  const hadBadLinkedInWait = plan.steps.some(s =>
+    s.capability === 'browser_wait_for_element' &&
+    BANNED_LINKEDIN_SELECTORS.some(sel => (s.parameters?.selector ?? '').includes(sel))
+  );
+  if (hadBadLinkedInWait) {
+    console.log('[Planner] Auto-removing invalid LinkedIn wait step — selector does not exist, browser_extract_results handles its own wait');
+    plan.steps = plan.steps.filter(s => !(
+      s.capability === 'browser_wait_for_element' &&
+      BANNED_LINKEDIN_SELECTORS.some(sel => (s.parameters?.selector ?? '').includes(sel))
+    ));
+    plan.steps.forEach((s, i) => s.step_number = i + 1);
+  }
+
   if (plan.requires_confirmation == null) {
     plan.requires_confirmation = plan.steps.some(s => s.safety_risk === 'high');
   }
@@ -571,6 +661,7 @@ export async function planTask(userPrompt: string): Promise<Plan> {
     throw new Error(`Failed to parse AI response: ${(err as Error).message}\n\nRaw output:\n${preview}`);
   }
 }
+
 export async function replanFromStep(
   originalSummary:  string,
   completedSteps:   Array<{ description: string; capability: string }>,
@@ -581,8 +672,6 @@ export async function replanFromStep(
   remainingGoal:    string,
 ): Promise<Plan | null> {
 
-  // Build a clear, context-rich prompt for the replanner.
-  // The AI sees exactly where execution stopped and what the goal still is.
   const prompt = [
     `ORIGINAL GOAL: ${originalSummary}`,
     '',
@@ -599,9 +688,9 @@ export async function replanFromStep(
     '',
     `REMAINING GOAL: ${remainingGoal}`,
     '',
-     `ERROR ANALYSIS:`,
-  ...analyzeError(errorMessage),
-  '',
+    `ERROR ANALYSIS:`,
+    ...analyzeError(errorMessage),
+    '',
     `Generate a NEW plan starting from the CURRENT PAGE (above) to achieve the remaining goal.`,
     `- Number your steps starting from 1`,
     `- Do NOT repeat the already-completed steps`,
