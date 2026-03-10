@@ -6,6 +6,7 @@
   "scripts": {
     "build": "tsc",
     "start": "node dist/server.js",
+    "auth": "ts-node scripts/authSetup.ts",
     "dev": "ts-node-dev --respawn --transpile-only src/server.ts",
     "typecheck": "tsc --noEmit"
   },
@@ -17,7 +18,12 @@
     "node-wallpaper": "^6.0.2",
     "openai": "^4.28.0",
     "playwright": "^1.41.2",
+    "playwright-extra": "^4.3.6",
+    "playwright-extra-plugin-stealth": "^0.0.1",
+    "puppeteer-extra-plugin-stealth": "^2.11.2",
+    "qrcode-terminal": "^0.12.0",
     "uuid": "^9.0.0",
+    "whatsapp-web.js": "^1.34.6",
     "ws": "^8.16.0"
   },
   "devDependencies": {

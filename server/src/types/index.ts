@@ -50,7 +50,8 @@ export type Capability =
 
   // Utility
   | 'wait';
-
+  | 'whatsapp_send'
+| 'whatsapp_get_chats';
 
 // ─── Step Parameters ──────────────────────────────────────────────────────────
 
