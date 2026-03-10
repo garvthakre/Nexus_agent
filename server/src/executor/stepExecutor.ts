@@ -37,14 +37,7 @@ function resolvePath(filePath: string): string {
   return path.isAbsolute(filePath) ? filePath : path.join(home, filePath);
 }
 
-// ─── FIX 1A: Smart waitUntil per domain ──────────────────────────────────────
-//
-// WHY: domcontentloaded fires before React/Vue renders on SPAs.
-// LinkedIn, Spotify, WhatsApp Web etc. need "networkidle" + extra wait.
-// YouTube needs "load" + wait. Others are fine with "domcontentloaded".
-//
-// IMPACT: Tier 0 now runs against actual DOM content → eliminates most
-//         unnecessary Groq API escalations (tiers 2/3).
+// ─── Smart waitUntil per domain ───────────────────────────────────────────────
 
 const SPA_DOMAINS = new Set([
   'linkedin.com', 'spotify.com', 'whatsapp.com', 'discord.com',
@@ -56,11 +49,13 @@ function getWaitStrategy(url: string): {
   waitUntil: 'domcontentloaded' | 'networkidle' | 'load';
   extraWait: number;
 } {
-  const isSpa = [...SPA_DOMAINS].some(d => url.includes(d));
+  // LinkedIn individual job pages — use domcontentloaded, React handles the rest
   if (url.includes('linkedin.com/jobs/view')) return { waitUntil: 'domcontentloaded', extraWait: 2000 };
-if (url.includes('linkedin.com/jobs')) return { waitUntil: 'networkidle', extraWait: 3000 };
-  if (isSpa) return { waitUntil: 'networkidle', extraWait: 2500 };
-  if (url.includes('youtube.com')) return { waitUntil: 'load', extraWait: 1500 };
+  // LinkedIn job search listing
+  if (url.includes('linkedin.com/jobs'))      return { waitUntil: 'networkidle',      extraWait: 3000 };
+  const isSpa = [...SPA_DOMAINS].some(d => url.includes(d));
+  if (isSpa)                                  return { waitUntil: 'networkidle',      extraWait: 2500 };
+  if (url.includes('youtube.com'))            return { waitUntil: 'load',             extraWait: 1500 };
   return { waitUntil: 'domcontentloaded', extraWait: 800 };
 }
 
@@ -140,14 +135,9 @@ export function getLivePage(): import('playwright').Page | null {
   return pageInstance;
 }
 
-// ─── Auth State Path ──────────────────────────────────────────────────────────
-// Created once by running: npm run auth
-// Loaded automatically on every Nexus run if it exists
-
 const AUTH_STATE_PATH = path.join(process.cwd(), 'auth-state.json');
 
 async function ensurePlaywright(): Promise<import('playwright').Page> {
-  // Reuse existing live page
   if (pageInstance) {
     try {
       await pageInstance.evaluate(() => true);
@@ -159,11 +149,10 @@ async function ensurePlaywright(): Promise<import('playwright').Page> {
     }
   }
 
- const { chromium } = await import('playwright-extra');
-const StealthPlugin = (await import('puppeteer-extra-plugin-stealth')).default;
-chromium.use(StealthPlugin());
+  const { chromium } = await import('playwright-extra');
+  const StealthPlugin = (await import('puppeteer-extra-plugin-stealth')).default;
+  chromium.use(StealthPlugin());
 
-  // Check if auth-state.json exists (created by npm run auth)
   const hasAuthState = fsSync.existsSync(AUTH_STATE_PATH);
   if (hasAuthState) {
     console.log('[Browser] Loading saved auth state (cookies/sessions)...');
@@ -172,7 +161,6 @@ chromium.use(StealthPlugin());
     console.log('[Browser] Tip: run "npm run auth" once to save your logins.');
   }
 
-  // Launch Chrome with saved session if available
   const configs: Parameters<typeof chromium.launch>[0][] = [
     { channel: 'chrome',  args: STEALTH_ARGS, headless: false },
     { channel: 'msedge',  args: STEALTH_ARGS, headless: false },
@@ -189,7 +177,6 @@ chromium.use(StealthPlugin());
   }
   if (!browser) throw new Error('Could not launch any browser. Run: npx playwright install chromium');
 
-  // Create context — load storageState if auth-state.json exists
   browserContext = await browser.newContext({
     viewport: { width: 1280, height: 800 },
     userAgent: REAL_USER_AGENT,
@@ -213,14 +200,8 @@ chromium.use(StealthPlugin());
 
   return pageInstance;
 }
-// ─── FIX 1E: Bot Detection (hard throw instead of silent continue) ────────────
-//
-// WHY: Old code logged "Continuing despite bot detection" and pressed on.
-// The next browserReadPage() would read the CAPTCHA page content and store it
-// in articleStore as if it were real article text — garbage in, garbage out.
-//
-// FIX: Throw a typed error after 20s so the executor triggers retry/replan.
-// Also saves the blocked URL so adaptive workarounds can try alternatives.
+
+// ─── Bot Detection ────────────────────────────────────────────────────────────
 
 export class BotDetectionError extends Error {
   constructor(public readonly blockedUrl: string, message: string) {
@@ -271,10 +252,7 @@ async function handleBotDetection(page: import('playwright').Page): Promise<void
   const isReallyBlocked = botSignals.some(s => finalTitle.toLowerCase().includes(s));
 
   if (isReallyBlocked) {
-    throw new BotDetectionError(
-      url,
-      `Bot detection active on ${url} after 20s`
-    );
+    throw new BotDetectionError(url, `Bot detection active on ${url} after 20s`);
   }
 
   console.log('[Browser] ✓ Bot detection cleared');
@@ -287,36 +265,36 @@ export async function executeStep(step: PlanStep): Promise<StepResult> {
   console.log(`[Executor] ${capability}`, parameters);
 
   switch (capability) {
-    case 'open_application':       return openApplication(parameters.app_name);
-    case 'set_wallpaper':          return setWallpaper(parameters.query);
-    case 'run_shell_command':      return runShellCommand(parameters.command);
-    case 'browser_open':           return browserOpen(parameters.url);
-    case 'browser_fill':           return browserFill(parameters.selector, parameters.value);
-    case 'browser_click':          return browserClick(parameters.selector);
-    case 'browser_read_page':      return browserReadPage(parameters.variable_name, parameters.topic);
-    case 'browser_extract_results': return browserExtractResults(parameters.variable_name, parameters.count ?? 10);
-    case 'browser_wait_for_element': return browserWaitForElement(parameters.selector, parameters.seconds ?? 10);
-    case 'browser_get_page_state': return browserGetPageState();
-    case 'browser_screenshot_analyze': return browserScreenshotAnalyze(parameters.target_description,parameters.action ?? 'click',parameters.value);
-    case 'type_text':              return typeText(parameters.text);
-    case 'create_file':            return createFile(parameters.path, parameters.content ?? '');
-    case 'create_folder':          return createFolder(parameters.path);
-    case 'wait':                   return wait(parameters.seconds ?? 1);
-    case 'download_file':          return downloadFileCapability(parameters.url, parameters.destination ?? parameters.path);
-    case 'app_find_window':        return appFindWindowStep(parameters.app_name, parameters.seconds);
-    case 'app_focus_window':       return appFocusWindowStep(parameters.app_name);
-    case 'app_click':              return appClickStep(parameters.app_name, parameters.element_name);
-    case 'app_type':               return appTypeStep(parameters.app_name, parameters.element_name, parameters.text);
-    case 'app_screenshot':         return appScreenshotStep(parameters.app_name);
-    case 'app_verify':             return appVerifyStep(parameters.app_name, parameters.text);
-    case 'browser_screenshot':     return browserTakeScreenshot(parameters.path);
-    case 'whatsapp_send':          return whatsappSend(parameters.contact, parameters.message);
-    case 'whatsapp_get_chats':         return whatsappGetChats(parameters.limit ?? 10);
+    case 'open_application':            return openApplication(parameters.app_name);
+    case 'set_wallpaper':               return setWallpaper(parameters.query);
+    case 'run_shell_command':           return runShellCommand(parameters.command);
+    case 'browser_open':                return browserOpen(parameters.url);
+    case 'browser_fill':                return browserFill(parameters.selector, parameters.value);
+    case 'browser_click':               return browserClick(parameters.selector);
+    case 'browser_read_page':           return browserReadPage(parameters.variable_name, parameters.topic);
+    case 'browser_extract_results':     return browserExtractResults(parameters.variable_name, parameters.count ?? 10);
+    case 'browser_wait_for_element':    return browserWaitForElement(parameters.selector, parameters.seconds ?? 10);
+    case 'browser_get_page_state':      return browserGetPageState();
+    case 'browser_screenshot_analyze':  return browserScreenshotAnalyze(parameters.target_description, parameters.action ?? 'click', parameters.value);
+    case 'type_text':                   return typeText(parameters.text);
+    case 'create_file':                 return createFile(parameters.path, parameters.content ?? '');
+    case 'create_folder':               return createFolder(parameters.path);
+    case 'wait':                        return wait(parameters.seconds ?? 1);
+    case 'download_file':               return downloadFileCapability(parameters.url, parameters.destination ?? parameters.path);
+    case 'app_find_window':             return appFindWindowStep(parameters.app_name, parameters.seconds);
+    case 'app_focus_window':            return appFocusWindowStep(parameters.app_name);
+    case 'app_click':                   return appClickStep(parameters.app_name, parameters.element_name);
+    case 'app_type':                    return appTypeStep(parameters.app_name, parameters.element_name, parameters.text);
+    case 'app_screenshot':              return appScreenshotStep(parameters.app_name);
+    case 'app_verify':                  return appVerifyStep(parameters.app_name, parameters.text);
+    case 'browser_screenshot':          return browserTakeScreenshot(parameters.path);
+    case 'whatsapp_send':               return whatsappSend(parameters.contact, parameters.message);
+    case 'whatsapp_get_chats':          return whatsappGetChats(parameters.limit ?? 10);
     default: throw new Error(`Unknown capability: ${capability}`);
   }
 }
 
-// ─── FIX 1A + 1D: Browser Open with smart wait + click verification ───────────
+// ─── Browser Open ─────────────────────────────────────────────────────────────
 
 async function browserOpen(url: string | undefined): Promise<StepResult> {
   if (!url) throw new Error('url is required');
@@ -338,8 +316,6 @@ async function browserOpen(url: string | undefined): Promise<StepResult> {
   }
 
   const page = await ensurePlaywright();
-
-  // FIX 1A: Use smart wait strategy instead of always domcontentloaded
   const { waitUntil, extraWait } = getWaitStrategy(url);
   console.log(`[browserOpen] waitUntil="${waitUntil}" extraWait=${extraWait}ms for ${url}`);
 
@@ -352,18 +328,7 @@ async function browserOpen(url: string | undefined): Promise<StepResult> {
   return { success: true, url, title, message: `Opened ${url} — "${title}"` };
 }
 
-// ─── FIX 1D: Post-click verification ─────────────────────────────────────────
-//
-// WHY: After clicking, NEXUS used to sleep 1200ms and move on blindly.
-// A failed click (due to overlay, timing, stale element) was invisible.
-//
-// FIX: After every click, check:
-//   1. Did the URL change? (navigation click worked)
-//   2. Did visible content change? (modal opened, element appeared)
-//   3. If neither changed AND the selector looked like a link → warn
-//
-// This uses a lightweight DOM snapshot (text length + link count) instead of
-// full screenshot diff — fast and doesn't need vision API.
+// ─── Page Snapshot (for click verification) ───────────────────────────────────
 
 async function getPageSnapshot(page: import('playwright').Page): Promise<{ url: string; textLen: number; linkCount: number }> {
   try {
@@ -396,7 +361,7 @@ async function verifyClickEffect(
   return { changed, newUrl: after.url, newTitle, changeType };
 }
 
-// ─── browserFill ─────────────────────────────────────────────────────────────
+// ─── browserFill ──────────────────────────────────────────────────────────────
 
 async function browserFill(selector: string | undefined, value: string | undefined): Promise<StepResult> {
   if (!selector) throw new Error('selector is required');
@@ -413,11 +378,7 @@ async function browserFill(selector: string | undefined, value: string | undefin
       await sleep(300);
       await page.keyboard.press('Control+a');
       await sleep(100);
-   
-      // Was: page.keyboard.type(value, { delay: 35 + Math.random() * 20 })
-      // Now: humanTypeIntoPage() calls humanDelay() per character (40–90ms random)
       await humanTypeIntoPage(page, value);
-      // ─────────────────────────────────────────────────────────────────────
       return { success: true, message: `Typed into contenteditable` };
     } catch (e) {
       console.warn('[browserFill] contenteditable failed:', (e as Error).message);
@@ -479,14 +440,7 @@ const articleStore: Record<string, string> = {};
 export function getArticleStore(): Record<string, string> { return { ...articleStore }; }
 export function clearArticleStore(): void { Object.keys(articleStore).forEach(k => delete articleStore[k]); }
 
-// ─── FIX 1B: browserReadPage — honest failure ─────────────────────────────────
-//
-// WHY: Old code returned success: true with fallback text "Could not extract..."
-// when rawText < 100 chars. create_file happily wrote this garbage into reports.
-// The task was marked successful but the output was worthless.
-//
-// FIX: Throw a typed ContentExtractionError so the executor retries or replans.
-// Also explicitly detect bot/CAPTCHA pages before attempting extraction.
+// ─── Content Extraction Error ─────────────────────────────────────────────────
 
 export class ContentExtractionError extends Error {
   constructor(
@@ -501,6 +455,8 @@ export class ContentExtractionError extends Error {
 
 let groqFailed = false;
 
+// ─── browserReadPage ──────────────────────────────────────────────────────────
+
 async function browserReadPage(
   variableName: string | undefined,
   topic: string | undefined,
@@ -509,40 +465,100 @@ async function browserReadPage(
   const url   = page.url();
   const title = await page.title().catch(() => 'Unknown');
 
-  // ── LinkedIn jobs special extractor ──────────────────────────────────────
- if (url.includes('linkedin.com/jobs')) {
-  const jobData = await page.evaluate(() => {
-    // Single job page
-    if (window.location.href.includes('/jobs/view/')) {
-      const title    = document.querySelector('.job-details-jobs-unified-top-card__job-title, h1')?.textContent?.trim() ?? '';
-      const company  = document.querySelector('.job-details-jobs-unified-top-card__company-name, .topcard__org-name-link')?.textContent?.trim() ?? '';
-      const location = document.querySelector('.job-details-jobs-unified-top-card__bullet, .topcard__flavor--bullet')?.textContent?.trim() ?? '';
-      const desc     = document.querySelector('.jobs-description__content, .description__text')?.textContent?.trim().slice(0, 800) ?? '';
-      return `${title} | ${company} | ${location}\n${desc}`;
-    }
-    // Job listing page — extract cards
-    const cards = Array.from(document.querySelectorAll([
-      '[data-view-name="job-card"]',
-      '.job-card-container',
-      '.scaffold-layout__list-container li',
-    ].join(',')));
-    return cards.slice(0, 10).map(card => {
-      const title    = card.querySelector('[class*="job-card-list__title"], a[class*="title"]')?.textContent?.trim() ?? '';
-      const company  = card.querySelector('[class*="subtitle"], [class*="company"]')?.textContent?.trim() ?? '';
-      const location = card.querySelector('[class*="location"]')?.textContent?.trim() ?? '';
-      const link     = card.querySelector('a')?.getAttribute('href') ?? '';
-      return `${title} | ${company} | ${location} | https://linkedin.com${link}`;
-    }).filter(Boolean).join('\n');
-  });
+  // ── LinkedIn individual job page extractor ────────────────────────────────
+  if (url.includes('linkedin.com/jobs/view')) {
+    console.log('[browserReadPage] LinkedIn job detail page — waiting for content to render...');
 
-  if (jobData && jobData.length > 30) {
-    if (variableName) {
-      articleStore[variableName] = jobData;
-      console.log(`[browserReadPage] LinkedIn extracted: ${jobData.length} chars`);
+    // Wait for any of the known job detail selectors to appear
+    await page.waitForSelector([
+      '.jobs-description',
+      '.job-details-jobs-unified-top-card__job-title',
+      '.jobs-unified-top-card__job-title',
+      '.jobs-box__html-content',
+      'h1',
+    ].join(','), { timeout: 8000 }).catch(() => {
+      console.warn('[browserReadPage] LinkedIn job detail selector timeout — trying anyway');
+    });
+
+    // Extra wait for React hydration
+    await sleep(2500);
+
+    const detail = await page.evaluate(() => {
+      const titleEl = document.querySelector([
+        '.job-details-jobs-unified-top-card__job-title h1',
+        '.jobs-unified-top-card__job-title h1',
+        '.t-24.t-bold',
+        'h1',
+      ].join(','));
+      const companyEl = document.querySelector([
+        '.job-details-jobs-unified-top-card__company-name a',
+        '.job-details-jobs-unified-top-card__company-name',
+        '.jobs-unified-top-card__company-name a',
+        '.jobs-unified-top-card__company-name',
+        '.topcard__org-name-link',
+        '[class*="company-name"]',
+      ].join(','));
+      const locationEl = document.querySelector([
+        '.job-details-jobs-unified-top-card__bullet',
+        '.jobs-unified-top-card__bullet',
+        '.topcard__flavor--bullet',
+        '[class*="job-insight"] span',
+      ].join(','));
+      const descEl = document.querySelector([
+        '.jobs-description__content .jobs-box__html-content',
+        '.jobs-description-content__text',
+        '.jobs-description__container',
+        '.description__text',
+        '.jobs-description',
+        '#job-details',
+      ].join(','));
+
+      const titleText    = titleEl?.textContent?.trim() ?? '';
+      const companyText  = companyEl?.textContent?.trim() ?? '';
+      const locationText = locationEl?.textContent?.trim() ?? '';
+      const descText     = descEl?.textContent?.replace(/\s+/g, ' ').trim().slice(0, 1200) ?? '';
+
+      if (!titleText && !descText) return null;
+      return `${titleText} | ${companyText} | ${locationText}\n${descText}`;
+    });
+
+    if (detail && detail.length > 30) {
+      if (variableName) {
+        articleStore[variableName] = detail;
+        console.log(`[browserReadPage] LinkedIn job detail extracted: ${detail.length} chars`);
+      }
+      return { success: true, message: `Extracted LinkedIn job detail`, summary: detail };
     }
-    return { success: true, message: `Extracted LinkedIn data`, summary: jobData };
+
+    // If still empty, fall through to generic extractor
+    console.warn('[browserReadPage] LinkedIn job detail extraction returned empty — falling back to generic extractor');
   }
-}
+
+  // ── LinkedIn job listing page (search results) ────────────────────────────
+  if (url.includes('linkedin.com/jobs') && !url.includes('/jobs/view')) {
+    const jobCards = await page.evaluate(() => {
+      const cards = Array.from(document.querySelectorAll([
+        '[data-view-name="job-card"]',
+        '.job-card-container',
+        '.scaffold-layout__list-container li',
+      ].join(',')));
+      return cards.slice(0, 10).map(card => {
+        const title    = card.querySelector('[class*="job-card-list__title"], a[class*="title"]')?.textContent?.trim() ?? '';
+        const company  = card.querySelector('[class*="subtitle"], [class*="company"]')?.textContent?.trim() ?? '';
+        const location = card.querySelector('[class*="location"]')?.textContent?.trim() ?? '';
+        const link     = card.querySelector('a')?.getAttribute('href') ?? '';
+        return `${title} | ${company} | ${location} | https://linkedin.com${link}`;
+      }).filter(Boolean).join('\n');
+    });
+
+    if (jobCards && jobCards.length > 30) {
+      if (variableName) {
+        articleStore[variableName] = jobCards;
+        console.log(`[browserReadPage] LinkedIn job listing extracted: ${jobCards.length} chars`);
+      }
+      return { success: true, message: `Extracted LinkedIn job listing`, summary: jobCards };
+    }
+  }
   // ─────────────────────────────────────────────────────────────────────────
 
   const isBotPage = await page.evaluate(() => {
@@ -623,14 +639,8 @@ async function browserReadPage(
     ...(groqFailed ? { warning: 'Groq summarization unavailable — raw text used as fallback' } : {}),
   };
 }
-// ─── FIX 1C: browserExtractResults — resolve relative URLs ───────────────────
-//
-// WHY: LinkedIn, Indeed, Naukri, Glassdoor all use relative paths like
-// /jobs/view/12345 or /job-listing/abc. The old filter
-// `if (!href.startsWith("http"))` silently dropped ALL of these.
-// Result: empty results array, task fails, but returns success: true.
-//
-// FIX: Resolve relative URLs to absolute using window.location inside evaluate().
+
+// ─── browserExtractResults ────────────────────────────────────────────────────
 
 async function browserExtractResults(
   variableName: string | undefined,
@@ -642,17 +652,18 @@ async function browserExtractResults(
   console.log(`[browserExtractResults] Scanning page: ${pageUrl}`);
 
   if (pageUrl.includes('bing.com') && (pageUrl.includes('rdr=1') || pageUrl.includes('rdrig='))) {
-  console.log('[browserExtractResults] Bing redirect detected — waiting 3s for results...');
-  await sleep(3000);
-  await page.waitForLoadState('networkidle', { timeout: 5000 }).catch(() => {});
-}
-if (pageUrl.includes('linkedin.com/jobs')) {
-  console.log('[browserExtractResults] LinkedIn jobs — waiting 5s for cards to render...');
-  await sleep(5000);
-  await page.waitForSelector('[data-view-name="job-card"], .job-card-container', { 
-    timeout: 10000 
-  }).catch(() => {});
-}
+    console.log('[browserExtractResults] Bing redirect detected — waiting 3s for results...');
+    await sleep(3000);
+    await page.waitForLoadState('networkidle', { timeout: 5000 }).catch(() => {});
+  }
+
+  if (pageUrl.includes('linkedin.com/jobs')) {
+    console.log('[browserExtractResults] LinkedIn jobs — waiting 5s for cards to render...');
+    await sleep(5000);
+    await page.waitForSelector('[data-view-name="job-card"], .job-card-container', {
+      timeout: 10000,
+    }).catch(() => {});
+  }
 
   const extracted = await page.evaluate((maxCount: number) => {
     interface ResultItem { title: string; url: string; description: string; index: number; }
@@ -665,7 +676,7 @@ if (pageUrl.includes('linkedin.com/jobs')) {
       /\.(css|js|png|jpg|jpeg|gif|svg|ico|pdf|zip|xml|json)$/i,
     ];
 
-    const currentOrigin = window.location.origin;
+    const currentOrigin   = window.location.origin;
     const currentProtocol = window.location.protocol;
 
     function resolveUrl(href: string): string | null {
@@ -792,7 +803,6 @@ async function browserWaitForElement(selector: string | undefined, timeoutSecond
     await page.waitForSelector(selector, { state: 'visible', timeout: timeoutSeconds * 1000 });
     return { success: true, message: `Element "${selector}" appeared on ${page.url()}` };
   } catch {
-    // Take a snapshot of what's actually on the page to help debug
     const currentUrl   = page.url();
     const currentTitle = await page.title().catch(() => '');
     const bodySnippet  = await page.evaluate(() =>
@@ -806,20 +816,17 @@ async function browserWaitForElement(selector: string | undefined, timeoutSecond
   }
 }
 
+// ─── WhatsApp ─────────────────────────────────────────────────────────────────
+
 async function whatsappSend(
   contact: string | undefined,
   message: string | undefined,
 ): Promise<import('../types').StepResult> {
   if (!contact) throw new Error('whatsapp_send requires "contact" parameter');
   if (!message) throw new Error('whatsapp_send requires "message" parameter');
-
   console.log(`[WhatsApp] Sending "${message}" to "${contact}"...`);
   const result = await sendWhatsAppMessage(contact, message);
-  return {
-    success: true,
-    message: result.message,
-    to: result.to,
-  };
+  return { success: true, message: result.message, to: result.to };
 }
 
 async function whatsappGetChats(limit: number): Promise<import('../types').StepResult> {
@@ -853,13 +860,8 @@ async function browserGetPageState(): Promise<StepResult> {
     };
   });
 
-  // Hard fail on bot or error page — triggers retry/replan
-  if (state.isBot) {
-    throw new BotDetectionError(state.url, `Bot detection active on ${state.url}`);
-  }
-  if (state.isError) {
-    throw new Error(`Error page detected: "${state.title}" on ${state.url}`);
-  }
+  if (state.isBot) throw new BotDetectionError(state.url, `Bot detection active on ${state.url}`);
+  if (state.isError) throw new Error(`Error page detected: "${state.title}" on ${state.url}`);
 
   return {
     success: true,
@@ -945,6 +947,10 @@ async function openApplicationLinux(appName: string): Promise<StepResult> {
 }
 
 // ─── Shell Command ────────────────────────────────────────────────────────────
+//
+// FIX: Paths containing spaces (e.g. "C:\Users\garv thakre\Desktop\file.py")
+// were being split by CMD because ~ expanded without quotes.
+// Now we properly quote any path argument that contains spaces.
 
 async function runShellCommand(command: string | undefined): Promise<StepResult> {
   if (!command) throw new Error('command is required');
@@ -955,14 +961,40 @@ async function runShellCommand(command: string | undefined): Promise<StepResult>
     if (p.test(command)) throw new Error(`Blocked dangerous command: ${command}`);
   }
 
+  // ── Expand ~ and fix forward slashes on Windows ──────────────────────────
   const home = os.homedir().replace(/\\/g, '/');
-  const expanded = process.platform === 'win32'
-    ? command.replace(/(^|\s)~(?=[\\/])/g, (_m, pre) => {
-        const p = home + '/';
-        return pre + (home.includes(' ') ? `"${p}` : p);
-      }).replace(/(\.(?:py|js|sh|bat|ps1))(?=\s|$)/g,
-        home.includes(' ') ? '$1"' : '$1')
-    : command.replace(/(^|\s)~(?=[\\/]|$)/g, `$1${home}/`);
+
+  let expanded: string;
+
+  if (process.platform === 'win32') {
+    // Replace ~/ with home dir (forward slashes for consistency)
+    expanded = command.replace(/(^|\s)~\//g, `$1${home}/`);
+
+    // Fix any double slashes introduced by substitution
+    expanded = expanded.replace(/\/\//g, '/');
+
+    // Now quote any path argument that contains spaces.
+    // Matches: python /path with spaces/file.py  OR  node /path with/file.js
+    // Wraps the file path in double quotes if not already quoted.
+    expanded = expanded.replace(
+      /^(\s*(?:python|python3|node|cmd|powershell)\s+)([^"'\n]+)$/i,
+      (_, interpreter, filePath) => {
+        const trimmed = filePath.trim();
+        // Already quoted — leave alone
+        if (trimmed.startsWith('"') || trimmed.startsWith("'")) return `${interpreter}${filePath}`;
+        // Contains spaces — add quotes
+        if (trimmed.includes(' ')) return `${interpreter}"${trimmed}"`;
+        return `${interpreter}${filePath}`;
+      }
+    );
+
+    // Convert remaining forward slashes inside quoted paths to backslashes on Windows
+    expanded = expanded.replace(/"([^"]+)"/g, (_, inner) =>
+      `"${inner.replace(/\//g, '\\')}"`
+    );
+  } else {
+    expanded = command.replace(/(^|\s)~(?=[\\/]|$)/g, `$1${home}/`);
+  }
 
   if (process.platform === 'win32' && /^\s*word\s+/i.test(command)) {
     const filePath = command.replace(/^\s*word\s+/i, '').trim();
@@ -987,10 +1019,6 @@ async function runShellCommand(command: string | undefined): Promise<StepResult>
     return { success: true, message: `Launched: ${expanded}` };
   }
 
-  // ── HUMAN TYPING PATCH 2: visible CMD typing on Windows ──────────────────
-  // Non-editor, non-blocked shell commands on Windows now open a visible CMD
-  // window and type the command character by character before executing.
-  // On Mac/Linux we keep the original silent execAsync behaviour.
   if (process.platform === 'win32') {
     try {
       const visibleScript = buildVisibleCmdScript(expanded);
@@ -1003,16 +1031,12 @@ async function runShellCommand(command: string | undefined): Promise<StepResult>
       if (stderr.trim()) console.warn(`[Shell] stderr: ${stderr.trim().slice(0, 500)}`);
       return { success: true, stdout: stdout.trim().slice(0, 5000) };
     } catch (err: unknown) {
-      // If visible CMD approach fails, fall through to silent execAsync
       console.warn('[Shell] Visible CMD typing failed, falling back to silent exec:', (err as Error).message);
     }
   }
-  // ─────────────────────────────────────────────────────────────────────────
-
-  const finalCommand = expanded;
 
   try {
-    const { stdout, stderr } = await execAsync(finalCommand, { timeout: 60_000, maxBuffer: 10 * 1024 * 1024 });
+    const { stdout, stderr } = await execAsync(expanded, { timeout: 60_000, maxBuffer: 10 * 1024 * 1024 });
     if (stdout.trim()) console.log(`[Shell] stdout: ${stdout.trim().slice(0, 500)}`);
     if (stderr.trim()) console.warn(`[Shell] stderr: ${stderr.trim().slice(0, 500)}`);
     return { success: true, stdout: stdout.trim().slice(0, 5000), stderr: stderr.trim().slice(0, 1000) };
@@ -1115,7 +1139,6 @@ async function typeText(text: string | undefined): Promise<StepResult> {
   }
   if (pageInstance) {
     try {
-      // ── HUMAN TYPING: typeText also uses humanTypeIntoPage ────────────────
       await humanTypeIntoPage(pageInstance, text);
       return { success: true, message: `Typed via Playwright (human rhythm)` };
     } catch { /* fall through */ }
@@ -1255,17 +1278,7 @@ async function fetchWallpaperImage(query: string, destPath: string): Promise<str
 
 process.on('exit', () => { void browserInstance?.close(); });
 
-// ───  browser_screenshot_analyze — vision-based element selection
-//
-// Used by the planner as an EXPLICIT step when a task is known to involve
-// a visually complex or non-standard UI element.
-//
-// This is separate from Tier 5 in Browserengine.ts:
-//   - Tier 5 = automatic silent fallback inside smartFindAndAct
-//   - browser_screenshot_analyze = a deliberate planner step the AI can choose
-//
-// Uses Google Gemini Flash (FREE — 1500 req/day at aistudio.google.com).
-// Falls back gracefully if GEMINI_API_KEY is not set.
+// ─── browser_screenshot_analyze ──────────────────────────────────────────────
 
 async function browserScreenshotAnalyze(
   targetDescription: string | undefined,
