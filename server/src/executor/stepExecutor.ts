@@ -10,7 +10,7 @@ import { PlanStep, StepResult } from '../types';
 import { appFindWindow, appClick, appType, appFocusWindow, appScreenshot, appVerify } from './desktopEngine';
 import { openApplicationWindows } from './windowsAppLauncher';
 import { smartFindAndAct } from './Browserengine';
- 
+import { sendWhatsAppMessage, getWhatsAppChats } from './whatsappClient';
 import { humanDelay, humanTypeIntoPage, buildVisibleCmdScript } from '../utils/humanTyping';
 
 const execAsync = promisify(exec);
@@ -57,6 +57,8 @@ function getWaitStrategy(url: string): {
   extraWait: number;
 } {
   const isSpa = [...SPA_DOMAINS].some(d => url.includes(d));
+  if (url.includes('linkedin.com/jobs/view')) return { waitUntil: 'domcontentloaded', extraWait: 2000 };
+if (url.includes('linkedin.com/jobs')) return { waitUntil: 'networkidle', extraWait: 3000 };
   if (isSpa) return { waitUntil: 'networkidle', extraWait: 2500 };
   if (url.includes('youtube.com')) return { waitUntil: 'load', extraWait: 1500 };
   return { waitUntil: 'domcontentloaded', extraWait: 800 };
@@ -138,69 +140,66 @@ export function getLivePage(): import('playwright').Page | null {
   return pageInstance;
 }
 
+// ─── Auth State Path ──────────────────────────────────────────────────────────
+// Created once by running: npm run auth
+// Loaded automatically on every Nexus run if it exists
+
+const AUTH_STATE_PATH = path.join(process.cwd(), 'auth-state.json');
+
 async function ensurePlaywright(): Promise<import('playwright').Page> {
+  // Reuse existing live page
   if (pageInstance) {
-    if (await isPageAlive(pageInstance)) return pageInstance;
-
-    console.log('[Browser] Page closed — recovering...');
-    pageInstance = null;
-
-    if (browserContext) {
-      try {
-        pageInstance = await browserContext.newPage();
-        await applyStealthScripts(pageInstance);
-        console.log('[Browser] ✓ Recovered with new page');
-        return pageInstance;
-      } catch { browserContext = null; }
+    try {
+      await pageInstance.evaluate(() => true);
+      return pageInstance;
+    } catch {
+      console.log('[Browser] Page closed — reconnecting...');
+      pageInstance = null;
+      browserContext = null;
     }
-
-    try { await browserInstance?.close(); } catch { /* ignore */ }
-    browserInstance = null;
   }
 
-  const { chromium } = await import('playwright');
+ const { chromium } = await import('playwright-extra');
+const StealthPlugin = (await import('puppeteer-extra-plugin-stealth')).default;
+chromium.use(StealthPlugin());
 
-  const configs = [
-    { channel: 'msedge',  args: STEALTH_ARGS, headless: false },
+  // Check if auth-state.json exists (created by npm run auth)
+  const hasAuthState = fsSync.existsSync(AUTH_STATE_PATH);
+  if (hasAuthState) {
+    console.log('[Browser] Loading saved auth state (cookies/sessions)...');
+  } else {
+    console.log('[Browser] No auth-state.json found — launching fresh browser.');
+    console.log('[Browser] Tip: run "npm run auth" once to save your logins.');
+  }
+
+  // Launch Chrome with saved session if available
+  const configs: Parameters<typeof chromium.launch>[0][] = [
     { channel: 'chrome',  args: STEALTH_ARGS, headless: false },
+    { channel: 'msedge',  args: STEALTH_ARGS, headless: false },
     {                      args: STEALTH_ARGS, headless: false },
   ];
 
+  let browser: import('playwright').Browser | null = null;
   for (const cfg of configs) {
     try {
-      browserInstance = await chromium.launch(cfg as Parameters<typeof chromium.launch>[0]);
-      console.log(`[Browser] Launched with config: ${(cfg as any).channel ?? 'bundled-chromium'}`);
+      browser = await chromium.launch(cfg);
+      console.log(`[Browser] Launched: ${(cfg as any).channel ?? 'bundled-chromium'}`);
       break;
-    } catch (e) {
-      const msg = (e as Error).message;
-      if (msg.includes("Executable doesn't exist") || msg.includes('playwright install')) {
-        console.log('[Browser] Installing Playwright Chromium...');
-        await execAsync('npx playwright install chromium', { timeout: 120_000 });
-        browserInstance = await chromium.launch({ args: STEALTH_ARGS, headless: false });
-        break;
-      }
-    }
+    } catch { /* try next */ }
   }
+  if (!browser) throw new Error('Could not launch any browser. Run: npx playwright install chromium');
 
-  if (!browserInstance) throw new Error('Could not launch browser. Run: npx playwright install chromium');
-
-  browserContext = await browserInstance.newContext({
+  // Create context — load storageState if auth-state.json exists
+  browserContext = await browser.newContext({
     viewport: { width: 1280, height: 800 },
     userAgent: REAL_USER_AGENT,
     locale: 'en-US',
-    timezoneId: 'Asia/Kolkata',
-    colorScheme: 'light',
-    extraHTTPHeaders: {
-      'Accept-Language': 'en-US,en;q=0.9',
-      'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
-      'sec-ch-ua': '"Chromium";v="122", "Not(A:Brand";v="24", "Google Chrome";v="122"',
-      'sec-ch-ua-mobile': '?0',
-      'sec-ch-ua-platform': '"Windows"',
-      'Upgrade-Insecure-Requests': '1',
-    },
+    ...(hasAuthState ? { storageState: AUTH_STATE_PATH } : {}),
   });
 
+  browserInstance = browser;
   pageInstance = await browserContext.newPage();
+
   await applyStealthScripts(pageInstance);
 
   pageInstance.on('crash', () => {
@@ -208,9 +207,12 @@ async function ensurePlaywright(): Promise<import('playwright').Page> {
     pageInstance = null;
   });
 
+  if (hasAuthState) {
+    console.log('[Browser] ✓ Browser ready with your saved logins');
+  }
+
   return pageInstance;
 }
-
 // ─── FIX 1E: Bot Detection (hard throw instead of silent continue) ────────────
 //
 // WHY: Old code logged "Continuing despite bot detection" and pressed on.
@@ -295,12 +297,7 @@ export async function executeStep(step: PlanStep): Promise<StepResult> {
     case 'browser_extract_results': return browserExtractResults(parameters.variable_name, parameters.count ?? 10);
     case 'browser_wait_for_element': return browserWaitForElement(parameters.selector, parameters.seconds ?? 10);
     case 'browser_get_page_state': return browserGetPageState();
-    case 'browser_screenshot_analyze':
-  return browserScreenshotAnalyze(
-    parameters.target_description,
-    parameters.action ?? 'click',
-    parameters.value
-  );
+    case 'browser_screenshot_analyze': return browserScreenshotAnalyze(parameters.target_description,parameters.action ?? 'click',parameters.value);
     case 'type_text':              return typeText(parameters.text);
     case 'create_file':            return createFile(parameters.path, parameters.content ?? '');
     case 'create_folder':          return createFolder(parameters.path);
@@ -313,6 +310,8 @@ export async function executeStep(step: PlanStep): Promise<StepResult> {
     case 'app_screenshot':         return appScreenshotStep(parameters.app_name);
     case 'app_verify':             return appVerifyStep(parameters.app_name, parameters.text);
     case 'browser_screenshot':     return browserTakeScreenshot(parameters.path);
+    case 'whatsapp_send':          return whatsappSend(parameters.contact, parameters.message);
+    case 'whatsapp_get_chats':         return whatsappGetChats(parameters.limit ?? 10);
     default: throw new Error(`Unknown capability: ${capability}`);
   }
 }
@@ -510,6 +509,42 @@ async function browserReadPage(
   const url   = page.url();
   const title = await page.title().catch(() => 'Unknown');
 
+  // ── LinkedIn jobs special extractor ──────────────────────────────────────
+ if (url.includes('linkedin.com/jobs')) {
+  const jobData = await page.evaluate(() => {
+    // Single job page
+    if (window.location.href.includes('/jobs/view/')) {
+      const title    = document.querySelector('.job-details-jobs-unified-top-card__job-title, h1')?.textContent?.trim() ?? '';
+      const company  = document.querySelector('.job-details-jobs-unified-top-card__company-name, .topcard__org-name-link')?.textContent?.trim() ?? '';
+      const location = document.querySelector('.job-details-jobs-unified-top-card__bullet, .topcard__flavor--bullet')?.textContent?.trim() ?? '';
+      const desc     = document.querySelector('.jobs-description__content, .description__text')?.textContent?.trim().slice(0, 800) ?? '';
+      return `${title} | ${company} | ${location}\n${desc}`;
+    }
+    // Job listing page — extract cards
+    const cards = Array.from(document.querySelectorAll([
+      '[data-view-name="job-card"]',
+      '.job-card-container',
+      '.scaffold-layout__list-container li',
+    ].join(',')));
+    return cards.slice(0, 10).map(card => {
+      const title    = card.querySelector('[class*="job-card-list__title"], a[class*="title"]')?.textContent?.trim() ?? '';
+      const company  = card.querySelector('[class*="subtitle"], [class*="company"]')?.textContent?.trim() ?? '';
+      const location = card.querySelector('[class*="location"]')?.textContent?.trim() ?? '';
+      const link     = card.querySelector('a')?.getAttribute('href') ?? '';
+      return `${title} | ${company} | ${location} | https://linkedin.com${link}`;
+    }).filter(Boolean).join('\n');
+  });
+
+  if (jobData && jobData.length > 30) {
+    if (variableName) {
+      articleStore[variableName] = jobData;
+      console.log(`[browserReadPage] LinkedIn extracted: ${jobData.length} chars`);
+    }
+    return { success: true, message: `Extracted LinkedIn data`, summary: jobData };
+  }
+}
+  // ─────────────────────────────────────────────────────────────────────────
+
   const isBotPage = await page.evaluate(() => {
     const t = document.title.toLowerCase();
     return t.includes('just a moment') || t.includes('access denied') ||
@@ -588,7 +623,6 @@ async function browserReadPage(
     ...(groqFailed ? { warning: 'Groq summarization unavailable — raw text used as fallback' } : {}),
   };
 }
-
 // ─── FIX 1C: browserExtractResults — resolve relative URLs ───────────────────
 //
 // WHY: LinkedIn, Indeed, Naukri, Glassdoor all use relative paths like
@@ -611,6 +645,13 @@ async function browserExtractResults(
   console.log('[browserExtractResults] Bing redirect detected — waiting 3s for results...');
   await sleep(3000);
   await page.waitForLoadState('networkidle', { timeout: 5000 }).catch(() => {});
+}
+if (pageUrl.includes('linkedin.com/jobs')) {
+  console.log('[browserExtractResults] LinkedIn jobs — waiting 5s for cards to render...');
+  await sleep(5000);
+  await page.waitForSelector('[data-view-name="job-card"], .job-card-container', { 
+    timeout: 10000 
+  }).catch(() => {});
 }
 
   const extracted = await page.evaluate((maxCount: number) => {
@@ -751,8 +792,42 @@ async function browserWaitForElement(selector: string | undefined, timeoutSecond
     await page.waitForSelector(selector, { state: 'visible', timeout: timeoutSeconds * 1000 });
     return { success: true, message: `Element "${selector}" appeared on ${page.url()}` };
   } catch {
-    throw new Error(`Element "${selector}" did not appear within ${timeoutSeconds}s on ${page.url()}`);
+    // Take a snapshot of what's actually on the page to help debug
+    const currentUrl   = page.url();
+    const currentTitle = await page.title().catch(() => '');
+    const bodySnippet  = await page.evaluate(() =>
+      (document.body?.innerText ?? '').slice(0, 300).replace(/\n+/g, ' ')
+    ).catch(() => '');
+    throw new Error(
+      `Element "${selector}" did not appear within ${timeoutSeconds}s\n` +
+      `  Page: "${currentTitle}" at ${currentUrl}\n` +
+      `  Body: "${bodySnippet}"`
+    );
   }
+}
+
+async function whatsappSend(
+  contact: string | undefined,
+  message: string | undefined,
+): Promise<import('../types').StepResult> {
+  if (!contact) throw new Error('whatsapp_send requires "contact" parameter');
+  if (!message) throw new Error('whatsapp_send requires "message" parameter');
+
+  console.log(`[WhatsApp] Sending "${message}" to "${contact}"...`);
+  const result = await sendWhatsAppMessage(contact, message);
+  return {
+    success: true,
+    message: result.message,
+    to: result.to,
+  };
+}
+
+async function whatsappGetChats(limit: number): Promise<import('../types').StepResult> {
+  const chats = await getWhatsAppChats(limit);
+  const summary = chats
+    .map((c, i) => `${i + 1}. ${c.name} (unread: ${c.unread}) — ${c.lastMessage ?? 'no message'}`)
+    .join('\n');
+  return { success: true, message: `Found ${chats.length} chats`, summary };
 }
 
 // ─── browserGetPageState ──────────────────────────────────────────────────────
