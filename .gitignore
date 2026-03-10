@@ -8,14 +8,16 @@ node_modules/
 .yarn/build-state.yml
 .yarn/install-state.gz
 
- 
+auth-state.json
 .next/
 out/
 build/
 .next.cache/
 .vercel/
 
- 
+.wwebjs_cache/
+whatsapp-session/
+
 dist/
 dist-electron/
 release/
