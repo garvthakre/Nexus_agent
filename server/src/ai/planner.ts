@@ -231,6 +231,17 @@ whatsapp_get_chats { limit?: number }
 
 NEVER generate browser_open "https://web.whatsapp.com" — it will always fail.
 
+whatsapp_call    { contact: "exact name", call_type?: "voice" | "video" }
+
+"call X on WhatsApp" → ALWAYS single step: whatsapp_call { contact: "X", call_type: "voice" }
+NEVER add whatsapp_send as a preceding step for calls — it is wrong and will fail.
+NEVER use message: "" — whatsapp_send always requires a non-empty message.
+
+"video call X on WhatsApp":
+  Step 1: whatsapp_call { contact: "X", call_type: "video" }
+
+ALWAYS use whatsapp_call for any call/video call request — never use browser automation for calls.
+
 ═══════════════════════════════════════════════
 EXTRACT-THEN-NAVIGATE PATTERN
 ═══════════════════════════════════════════════
@@ -288,6 +299,12 @@ PATH RULES
 - Excel documents: NEVER use create_file for .xlsx — use Python openpyxl script
 - run_shell_command with "node" or "python": ALWAYS use ~/Desktop/<file> path
   NEVER use bare filenames like "node app.js" — always "node ~/Desktop/app.js"
+- Opening local HTML/CSS/JS files in browser:
+  ALWAYS use run_shell_command { command: "start ~/Desktop/file.html" }
+  NEVER use browser_open with file:// URLs — tilde is not expanded by the browser
+  and path quoting breaks on Windows usernames with spaces.
+  CORRECT: run_shell_command { command: "start ~/Desktop/index.html" }
+  WRONG:   browser_open { url: "file:///~/Desktop/index.html" }  ← BANNED
 ═══════════════════════════════════════════════
 CAPABILITY CATALOG
 ═══════════════════════════════════════════════
@@ -524,7 +541,7 @@ const VALID_CAPABILITIES: Capability[] = [
   'browser_open', 'browser_fill', 'browser_click', 'browser_read_page', 'browser_extract_results',
   'browser_wait_for_element', 'browser_get_page_state','browser_screenshot',
   'type_text', 'create_file', 'create_folder', 'wait', 'download_file',
-  'app_find_window', 'app_focus_window', 'app_click', 'app_type','whatsapp_send', 'whatsapp_get_chats',
+  'app_find_window', 'app_focus_window', 'app_click', 'app_type','whatsapp_send', 'whatsapp_get_chats','whatsapp_call',
 ];
 
 function validatePlan(raw: string): Plan {
