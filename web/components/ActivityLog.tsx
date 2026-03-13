@@ -2,72 +2,76 @@
 import { useEffect, useRef } from 'react'
 import { ActivityEvent, WsMessageType } from '@/types'
 
-interface TypeStyle {
-  color: string
-  prefix: string
-}
+interface TypeStyle { color: string; prefix: string }
 
 const TYPE_STYLES: Record<WsMessageType, TypeStyle> = {
-  connected:          { color: 'text-accent3',  prefix: '✓ SYSTEM'   },
-  planning:           { color: 'text-accent',   prefix: '◈ AI'       },
-  plan_ready:         { color: 'text-accent3',  prefix: '✓ PLAN'     },
-  execution_start:    { color: 'text-accent',   prefix: '▶ EXEC'     },
-  step_start:         { color: 'text-white',    prefix: '  →'        },
-  step_complete:      { color: 'text-accent3',  prefix: '  ✓'        },
-  step_error:         { color: 'text-danger',   prefix: '  ✗'        },
-  safety_check:       { color: 'text-warn',     prefix: '⚠ SAFETY'  },
-  execution_complete: { color: 'text-accent3',  prefix: '✓ COMPLETE' },
-  execution_failed:   { color: 'text-danger',   prefix: '✗ FAILED'  },
-  execution_stopped:  { color: 'text-warn',     prefix: '■ STOPPED'  },
-  error:              { color: 'text-danger',   prefix: '✗ ERROR'   },
+  connected:          { color: 'text-green',  prefix: '✓ SYS'  },
+  planning:           { color: 'text-cyan',   prefix: '◈  AI'  },
+  plan_ready:         { color: 'text-green',  prefix: '✓ PLN'  },
+  execution_start:    { color: 'text-cyan',   prefix: '▶ RUN'  },
+  step_start:         { color: 'text-ntext',  prefix: '   →'   },
+  step_complete:      { color: 'text-green',  prefix: '   ✓'   },
+  step_error:         { color: 'text-red',    prefix: '   ✗'   },
+  safety_check:       { color: 'text-amber',  prefix: '⚠ SAF' },
+  execution_complete: { color: 'text-green',  prefix: '✓ DONE' },
+  execution_failed:   { color: 'text-red',    prefix: '✗ FAIL' },
+  execution_stopped:  { color: 'text-amber',  prefix: '■ STOP' },
+  error:              { color: 'text-red',    prefix: '✗ ERR'  },
 }
 
-const FALLBACK_STYLE: TypeStyle = { color: 'text-muted', prefix: ' ·' }
+const FALLBACK: TypeStyle = { color: 'text-muted', prefix: '  ·' }
 
-interface ActivityLogProps {
-  events: ActivityEvent[]
-}
-
-export default function ActivityLog({ events }: ActivityLogProps) {
+export default function ActivityLog({ events }: { events: ActivityEvent[] }) {
   const scrollRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
-    if (scrollRef.current) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight
-    }
+    if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight
   }, [events])
 
   return (
-    <div className="flex flex-col h-full">
-      <div className="flex items-center justify-between px-4 py-2 border-b border-border">
-        <span className="text-xs font-mono text-muted uppercase tracking-wider">ACTIVITY LOG</span>
-        <span className="text-xs font-mono text-dim">{events.length} events</span>
+    <div className="flex flex-col h-full bg-s1 border border-border rounded-[13px] overflow-hidden glow-border">
+
+      {/* Title bar */}
+      <div className="flex items-center gap-2 px-[14px] py-[9px] border-b border-border bg-s2 flex-shrink-0">
+        <div className="flex gap-[5px]">
+          {['#ff5f57','#ffbd2e','#28c840'].map((c, i) => (
+            <div key={i} className="w-[9px] h-[9px] rounded-full opacity-75" style={{ background: c }} />
+          ))}
+        </div>
+        <span className="font-mono text-[10.5px] text-muted ml-1">nexus — activity log</span>
+        <span className="font-mono text-[9.5px] text-dim ml-auto">{events.length} events</span>
       </div>
 
-      <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 space-y-1 font-mono text-xs">
+      {/* Events */}
+      <div ref={scrollRef} className="flex-1 overflow-y-auto py-[10px] font-mono">
         {events.length === 0 ? (
-          <div className="text-dim text-center py-8">
-            <div className="mb-2">▋</div>
-            Waiting for activity...
+          <div className="text-center text-dim font-mono text-[11px] py-7">
+            awaiting activity...
           </div>
-        ) : (
-          events.map((event, i) => {
-            const style = TYPE_STYLES[event.type] ?? FALLBACK_STYLE
-            return (
-              <div key={i} className="flex items-start gap-2 animate-fade-in">
-                <span className="text-dim flex-shrink-0 w-16 text-right">{event.time}</span>
-                <span className={`flex-shrink-0 w-16 ${style.color}`}>{style.prefix}</span>
-                <span className={`${style.color} opacity-80 break-all`}>{event.message}</span>
-              </div>
-            )
-          })
-        )}
-        {events.length > 0 && (
-          <div className="text-dim flex items-center gap-1">
-            <span>{'>'}</span>
-            <span className="cursor-blink">▋</span>
-          </div>
-        )}
+        ) : events.map((ev, i) => {
+          const s = TYPE_STYLES[ev.type] ?? FALLBACK
+          const isLast = i === events.length - 1
+          return (
+            <div
+              key={i}
+              className={`flex gap-0 py-[1.5px] text-[10.5px] leading-[1.65] ${isLast ? 'slide-up-anim' : ''}`}
+            >
+              <span className="text-dim w-[66px] pl-3 pr-2 flex-shrink-0 select-none">{ev.time}</span>
+              <span className={`w-[40px] flex-shrink-0 font-semibold ${s.color}`}>{s.prefix}</span>
+              <span className={`flex-1 pr-3 break-all ${s.color} ${ev.type === 'connected' ? 'opacity-55' : 'opacity-90'}`}>
+                {ev.message}
+              </span>
+            </div>
+          )
+        })}
+
+        {/* Blinking cursor */}
+        <div className="flex items-center gap-[5px] pl-3 pt-1 font-mono text-[10.5px]">
+          <span className="text-dim">nexus@agent</span>
+          <span className="text-muted">~</span>
+          <span className="text-cyan">$</span>
+          <span className="inline-block w-[6.5px] h-3 bg-cyan ml-1 rounded-[1px] cursor-blink" />
+        </div>
       </div>
     </div>
   )
