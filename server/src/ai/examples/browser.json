@@ -81,18 +81,34 @@
       { "capability": "browser_fill", "parameters": { "selector": "input[data-testid='search-input']", "value": "jazz music" }, "safety_risk": "low" }
     ]
   },
-  {
-    "category": "browser_linkedin_jobs",
-    "request": "search LinkedIn for Python developer jobs in Bangalore and save results",
-    "keywords": ["linkedin", "jobs", "career", "hiring", "work", "position", "developer"],
-    "steps": [
-      { "capability": "browser_open", "parameters": { "url": "https://www.linkedin.com/jobs/search?keywords=Python+Developer&location=Bangalore" }, "safety_risk": "low" },
-      { "capability": "browser_wait_for_element", "parameters": { "selector": ".jobs-search-results-list", "seconds": 10 }, "safety_risk": "low" },
-      { "capability": "browser_extract_results", "parameters": { "variable_name": "jobs", "count": 5 }, "safety_risk": "low" },
-      { "capability": "browser_open", "parameters": { "url": "{{jobs_0_url}}" }, "safety_risk": "low" },
-      { "capability": "browser_read_page", "parameters": { "variable_name": "job1", "topic": "job listing" }, "safety_risk": "low" },
-      { "capability": "create_file", "parameters": { "path": "Desktop/Jobs.txt", "content": "JOB 1\n{{job1}}" }, "safety_risk": "low" },
-      { "capability": "run_shell_command", "parameters": { "command": "notepad ~/Desktop/Jobs.txt" }, "safety_risk": "low" }
-    ]
-  }
+{
+  "category": "browser_linkedin_jobs",
+  "request": "search LinkedIn for Python developer jobs in Bangalore and save results",
+  "keywords": ["linkedin", "jobs", "career", "hiring", "work", "position", "developer"],
+  "steps": [
+    {
+      "capability": "browser_open",
+      "parameters": { "url": "https://www.linkedin.com/jobs/search?keywords=Python+Developer&location=Bangalore" },
+      "safety_risk": "low"
+    },
+    {
+      "capability": "browser_extract_results",
+      "parameters": { "variable_name": "jobs", "count": 5 },
+      "safety_risk": "low"
+    },
+    {
+      "capability": "create_file",
+      "parameters": {
+        "path": "Desktop/make_excel.py",
+        "content": "import subprocess, sys, os\ntry:\n    import openpyxl\nexcept ImportError:\n    subprocess.check_call([sys.executable,'-m','pip','install','openpyxl','--quiet'])\n    import openpyxl\nfrom openpyxl.styles import Font, PatternFill, Alignment\nwb = openpyxl.Workbook()\nws = wb.active\nws.title = 'Jobs'\nheaders = ['#', 'Title', 'URL']\nws.append(headers)\nfor cell in ws[1]:\n    cell.font = Font(bold=True, color='FFFFFF')\n    cell.fill = PatternFill('solid', fgColor='1F4E79')\njobs = [\n    (1, '{{results_0_title}}', '{{results_0_url}}'),\n    (2, '{{results_1_title}}', '{{results_1_url}}'),\n    (3, '{{results_2_title}}', '{{results_2_url}}'),\n]\nfor num, title, url in jobs:\n    ws.append([num, title, url])\nfor row in ws.iter_rows(min_row=2):\n    for cell in row:\n        cell.alignment = Alignment(wrap_text=True, vertical='top')\nws.column_dimensions['A'].width = 5\nws.column_dimensions['B'].width = 60\nws.column_dimensions['C'].width = 80\npath = os.path.expanduser('~/Desktop/LinkedInJobs.xlsx')\nwb.save(path)\nif sys.platform == 'win32':\n    os.startfile(path)\nprint('Saved:', path)\n"
+      },
+      "safety_risk": "low"
+    },
+    {
+      "capability": "run_shell_command",
+      "parameters": { "command": "python ~/Desktop/make_excel.py" },
+      "safety_risk": "low"
+    }
+  ]
+}
 ]
