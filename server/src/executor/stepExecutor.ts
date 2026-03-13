@@ -1068,14 +1068,16 @@ async function runShellCommand(command: string | undefined): Promise<StepResult>
     return { success: true, message: `Opened: ${afterStart}` };
   }
 
-  if (process.platform === 'win32') {
-    try {
-      const visibleScript = buildVisibleCmdScript(expanded);
-      console.log(`[Shell] Typing command visibly in CMD: ${expanded.slice(0, 60)}`);
-      const { stdout, stderr } = await execAsync(
-        `powershell -NoProfile -Command "${visibleScript}"`,
-        { timeout: 90_000, maxBuffer: 10 * 1024 * 1024 }
-      );
+if (process.platform === 'win32') {
+  try {
+    const visibleScript = buildVisibleCmdScript(expanded);
+    // Escape inner double-quotes so they survive the outer PowerShell "..." wrapper
+    const psCommandArg = visibleScript.replace(/"/g, '\\"');
+    console.log(`[Shell] Typing command visibly in CMD: ${expanded.slice(0, 60)}`);
+    const { stdout, stderr } = await execAsync(
+      `powershell -NoProfile -Command "${psCommandArg}"`,
+      { timeout: 90_000, maxBuffer: 10 * 1024 * 1024 }
+    );
       if (stdout.trim()) console.log(`[Shell] stdout: ${stdout.trim().slice(0, 500)}`);
       if (stderr.trim()) console.warn(`[Shell] stderr: ${stderr.trim().slice(0, 500)}`);
       return { success: true, stdout: stdout.trim().slice(0, 5000) };
