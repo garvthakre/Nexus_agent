@@ -52,6 +52,7 @@ export type Capability =
   | 'wait';
   | 'whatsapp_send'
 | 'whatsapp_get_chats';
+ | 'whatsapp_call';
 
 // ─── Step Parameters ──────────────────────────────────────────────────────────
 
@@ -88,6 +89,9 @@ export interface StepParameters {
 
   // set_wallpaper
   query?: string;
+
+  // whatsapp_call
+  call_type?: 'voice' | 'video';
 }
 
 
