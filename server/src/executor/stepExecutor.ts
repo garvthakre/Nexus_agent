@@ -10,7 +10,7 @@ import { PlanStep, StepResult } from '../types';
 import { appFindWindow, appClick, appType, appFocusWindow, appScreenshot, appVerify } from './desktopEngine';
 import { openApplicationWindows } from './windowsAppLauncher';
 import { smartFindAndAct } from './Browserengine';
-import { sendWhatsAppMessage, getWhatsAppChats } from './whatsappClient';
+import { sendWhatsAppMessage, getWhatsAppChats , makeWhatsAppCall } from './whatsappClient';
 import { humanDelay, humanTypeIntoPage, buildVisibleCmdScript } from '../utils/humanTyping';
 
 const execAsync = promisify(exec);
@@ -290,6 +290,7 @@ export async function executeStep(step: PlanStep): Promise<StepResult> {
     case 'browser_screenshot':          return browserTakeScreenshot(parameters.path);
     case 'whatsapp_send':               return whatsappSend(parameters.contact, parameters.message);
     case 'whatsapp_get_chats':          return whatsappGetChats(parameters.limit ?? 10);
+    case 'whatsapp_call':       return whatsappCall(parameters.contact, parameters.call_type ?? 'voice');
     default: throw new Error(`Unknown capability: ${capability}`);
   }
 }
@@ -309,11 +310,17 @@ async function browserOpen(url: string | undefined): Promise<StepResult> {
     return match;
   });
 
-  if (!url.startsWith('http://') && !url.startsWith('https://')) {
-    url = (!url.includes('.') || url.includes(' '))
-      ? `https://www.bing.com/search?q=${encodeURIComponent(url)}`
-      : `https://${url}`;
-  }
+if (url.startsWith('file://')) {
+  // Expand ~ to real home directory in file:// URLs
+  const home = os.homedir().replace(/\\/g, '/');
+  url = url.replace('file:///~/', `file:///${home}/`).replace('file://~/', `file:///${home}/`);
+  // On Windows: file:///C:/Users/... — ensure no double slashes
+  url = url.replace(/^file:\/\/\/([A-Za-z]:)/, 'file:///$1');
+} else if (!url.startsWith('http://') && !url.startsWith('https://')) {
+  url = (!url.includes('.') || url.includes(' '))
+    ? `https://www.bing.com/search?q=${encodeURIComponent(url)}`
+    : `https://${url}`;
+}
 
   const page = await ensurePlaywright();
   const { waitUntil, extraWait } = getWaitStrategy(url);
@@ -974,10 +981,10 @@ async function runShellCommand(command: string | undefined): Promise<StepResult>
     expanded = expanded.replace(/\/\//g, '/');
 
     // Now quote any path argument that contains spaces.
-    // Matches: python /path with spaces/file.py  OR  node /path with/file.js
+    // Matches: python /path with spaces/file.py  OR  code /path with/file.js etc.
     // Wraps the file path in double quotes if not already quoted.
     expanded = expanded.replace(
-      /^(\s*(?:python|python3|node|cmd|powershell)\s+)([^"'\n]+)$/i,
+      /^(\s*(?:python|python3|node|cmd|powershell|code|notepad|notepad2|subl|atom)\s+)([^"'\n]+)$/i,
       (_, interpreter, filePath) => {
         const trimmed = filePath.trim();
         // Already quoted — leave alone
@@ -1007,16 +1014,58 @@ async function runShellCommand(command: string | undefined): Promise<StepResult>
     return { success: true, message: `Opened ${resolvedPath}` };
   }
 
+  // ── Editor launch (code, notepad, etc.) ──────────────────────────────────
   const isEditorLaunch = /^\s*(code|notepad|notepad2|subl|atom|gedit|kate)\s+/i.test(expanded);
   if (isEditorLaunch) {
     if (process.platform === 'win32') {
-      try { await execAsync(`start "" ${expanded}`, { timeout: 10_000 }); }
-      catch { try { await execAsync(expanded, { timeout: 10_000 }); } catch { /* ignore */ } }
+      // Re-extract and re-quote the file path — spaces in usernames break unquoted paths
+      const editorMatch = expanded.match(/^\s*(code|notepad|notepad2|subl|atom|gedit|kate)\s+(.+)$/i);
+      if (editorMatch) {
+        const editor = editorMatch[1];
+        let filePath = editorMatch[2].trim().replace(/\//g, '\\');
+        if (!filePath.startsWith('"') && filePath.includes(' ')) {
+          filePath = `"${filePath}"`;
+        }
+        expanded = `${editor} ${filePath}`;
+      }
+      try { await execAsync(expanded, { timeout: 10_000 }); }
+      catch { /* ignore — editor launched fire-and-forget */ }
     } else {
       execAsync(`${expanded} &`).catch(() => {});
       await sleep(800);
     }
     return { success: true, message: `Launched: ${expanded}` };
+  }
+
+  // ── Handle "start" commands — must use start "" "path" on Windows ─────────
+  // Windows "start" treats the first quoted arg as the window title, so paths
+  // with spaces (e.g. usernames like "garv thakre") get truncated at the space.
+  // Fix: always inject an empty title "" before the actual path.
+  const isStartCommand = /^\s*start\s+/i.test(expanded);
+  if (isStartCommand && process.platform === 'win32') {
+    // Strip the leading "start" keyword
+    let afterStart = expanded.replace(/^\s*start\s+/i, '').trim();
+
+    // Expand any remaining ~ that slipped through
+    const homeWin = os.homedir();
+    afterStart = afterStart
+      .replace(/^~[\\/]/, homeWin + '\\')
+      .replace(/\//g, '\\');
+
+    // Strip any existing surrounding quotes so we can re-quote cleanly
+    if (afterStart.startsWith('"') && afterStart.endsWith('"')) {
+      afterStart = afterStart.slice(1, -1);
+    }
+
+    // Always use: start "" "full\path\to\file"
+    const finalCmd = `start "" "${afterStart}"`;
+    console.log(`[Shell] start command: ${finalCmd}`);
+    try {
+      await execAsync(finalCmd, { timeout: 10_000 });
+    } catch {
+      // start is fire-and-forget — non-zero exit is normal
+    }
+    return { success: true, message: `Opened: ${afterStart}` };
   }
 
   if (process.platform === 'win32') {
@@ -1060,7 +1109,6 @@ async function runShellCommand(command: string | undefined): Promise<StepResult>
     throw new Error(`Shell failed: ${e.message.slice(0, 300)}`);
   }
 }
-
 // ─── File Operations ──────────────────────────────────────────────────────────
 
 async function createFile(filePath: string | undefined, content: string): Promise<StepResult> {
@@ -1365,4 +1413,14 @@ async function browserTakeScreenshot(savePath?: string): Promise<StepResult> {
   }
 
   return { success: true, path: dest, message: `Screenshot saved to ${dest} (${Math.round(fileStat.size / 1024)}KB)` };
+}
+async function whatsappCall(
+  contact: string | undefined,
+  callType: string,
+): Promise<StepResult> {
+  if (!contact) throw new Error('whatsapp_call requires "contact" parameter');
+  const type = callType === 'video' ? 'video' : 'voice';
+  console.log(`[WhatsApp] ${type} call to "${contact}"...`);
+  const result = await makeWhatsAppCall(contact, type);
+  return { success: true, message: result.message, to: result.to } as StepResult;
 }
