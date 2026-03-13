@@ -49,20 +49,18 @@
       { "capability": "browser_click", "parameters": { "selector": "ytd-video-renderer a#video-title" }, "safety_risk": "low" }
     ]
   },
-  {
-    "category": "browser_whatsapp",
-    "request": "open WhatsApp Web search for John and send a message",
-    "keywords": ["whatsapp", "message", "send", "chat", "contact"],
-    "steps": [
-      { "capability": "browser_open", "parameters": { "url": "https://web.whatsapp.com" }, "safety_risk": "low" },
-      { "capability": "wait", "parameters": { "seconds": 4 }, "safety_risk": "low" },
-      { "capability": "browser_fill", "parameters": { "selector": "div[contenteditable][data-tab='3']", "value": "John" }, "safety_risk": "low" },
-      { "capability": "wait", "parameters": { "seconds": 1 }, "safety_risk": "low" },
-      { "capability": "browser_click", "parameters": { "selector": "span[title='John']" }, "safety_risk": "low" },
-      { "capability": "browser_fill", "parameters": { "selector": "div[contenteditable][data-tab='10']", "value": "Hey, I'll be late by 10 minutes!" }, "safety_risk": "low" },
-      { "capability": "browser_click", "parameters": { "selector": "[data-testid='send']" }, "safety_risk": "low" }
-    ]
-  },
+{
+  "category": "whatsapp_send_message",
+  "request": "open WhatsApp Web search for John and send a message hey",
+  "keywords": ["whatsapp", "message", "send", "chat", "contact", "wa"],
+  "steps": [
+    {
+      "capability": "whatsapp_send",
+      "parameters": { "contact": "John", "message": "hey" },
+      "safety_risk": "low"
+    }
+  ]
+},
   {
     "category": "browser_amazon",
     "request": "find wireless headphones under 2000 rupees on Amazon India",

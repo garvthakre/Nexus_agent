@@ -8,11 +8,11 @@
     ]
   },
   {
-    "category": "app_open_only",
-    "request": "open WhatsApp",
-    "keywords": ["open", "whatsapp", "app"],
+    "category": "whatsapp_send",
+    "request": "open WhatsApp and send a message",
+    "keywords": ["open", "whatsapp", "send", "message", "chat", "contact", "wa"],
     "steps": [
-      { "capability": "browser_open", "parameters": { "url": "https://web.whatsapp.com" }, "safety_risk": "low" }
+      { "capability": "whatsapp_send", "parameters": { "contact": "John", "message": "hey" }, "safety_risk": "low" }
     ]
   },
   {
