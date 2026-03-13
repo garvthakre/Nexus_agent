@@ -18,6 +18,10 @@ const SESSION_PATH = path.join(process.cwd(), 'whatsapp-session');
 let clientInstance: any = null;
 let clientReady = false;
 let initPromise: Promise<void> | null = null;
+ 
+function sleep(ms: number): Promise<void> {
+  return new Promise(r => setTimeout(r, ms));
+}
 
 // ─── Initialize WhatsApp Client ───────────────────────────────────────────────
 
@@ -187,13 +191,148 @@ export async function sendWhatsAppMessage(
 
 // ─── Get recent chats ─────────────────────────────────────────────────────────
 
-export async function getWhatsAppChats(limit = 10): Promise<any[]> {
+export async function makeWhatsAppCall(
+  contactName: string,
+  callType: 'voice' | 'video' = 'voice',
+): Promise<{ success: boolean; message: string; to?: string }> {
+  console.log(`[WhatsApp] Initiating ${callType} call to "${contactName}"...`);
+
   const client = await getWhatsAppClient();
-  const chats = await client.getChats();
-  return chats.slice(0, limit).map((c: any) => ({
-    name: c.name,
-    unread: c.unreadCount,
-    lastMessage: c.lastMessage?.body?.slice(0, 100),
-    timestamp: c.timestamp,
-  }));
+  if (!client) throw new Error('WhatsApp client failed to initialize');
+
+  const contact = await findContact(client, contactName);
+  let displayName: string;
+
+  if (contact) {
+    displayName = contact.name ?? contact.pushname ?? contactName;
+  } else {
+    const chats = await client.getChats();
+    const chatMatch = chats.find((c: any) =>
+      c.name?.toLowerCase().includes(contactName.toLowerCase())
+    );
+    if (!chatMatch) throw new Error(`Contact "${contactName}" not found in WhatsApp.`);
+    displayName = chatMatch.name;
+  }
+
+  console.log(`[WhatsApp Call] Found: ${displayName}`);
+
+  const page = client.pupPage;
+  if (!page) throw new Error('WhatsApp pupPage not available');
+
+  // ── Click the WhatsApp search icon (top of sidebar) ──────────────────────
+  // These are the actual WhatsApp Web search triggers — NOT Ctrl+F
+  const SEARCH_ICON_SELECTORS = [
+    "[data-testid='search']",
+    "[data-testid='chat-list-search']",
+    "span[data-icon='search']",
+    "[aria-label='Search or start new chat']",
+    "div[title='Search or start new chat']",
+  ];
+
+  let searchOpened = false;
+  for (const sel of SEARCH_ICON_SELECTORS) {
+    try {
+      await page.waitForSelector(sel, { timeout: 3000 });
+      await page.click(sel);
+      searchOpened = true;
+      console.log(`[WhatsApp Call] Search opened via: ${sel}`);
+      break;
+    } catch {}
+  }
+
+  if (!searchOpened) {
+    // Take screenshot so we can see what state the page is in
+    await page.screenshot({ path: 'whatsapp-debug.png' });
+    throw new Error('Could not open WhatsApp search. Screenshot saved as whatsapp-debug.png');
+  }
+
+  await sleep(800);
+
+  // ── Type contact name ─────────────────────────────────────────────────────
+  // Find the actual text input that appears after clicking search
+  const SEARCH_INPUT_SELECTORS = [
+    "[data-testid='chat-list-search']",
+    "div[contenteditable][data-tab='3']",
+    "[aria-label='Search input textbox']",
+    "input[type='text']",
+  ];
+
+  for (const sel of SEARCH_INPUT_SELECTORS) {
+    try {
+      await page.waitForSelector(sel, { timeout: 3000 });
+      await page.click(sel);
+      break;
+    } catch {}
+  }
+
+  await sleep(300);
+  await page.keyboard.type(contactName, { delay: 80 });
+  console.log(`[WhatsApp Call] Typed "${contactName}"`);
+  await sleep(2500);
+
+  // ── Click first contact result ────────────────────────────────────────────
+  const RESULT_SELECTORS = [
+    `[data-testid='cell-frame-container']:has-text("${displayName}")`,
+    `[data-testid='cell-frame-container']:has-text("${contactName}")`,
+    `span[title="${displayName}"]`,
+    `span[title="${contactName}"]`,
+    "[data-testid='cell-frame-container']",  // fallback: first result
+  ];
+
+  let chatOpened = false;
+  for (const sel of RESULT_SELECTORS) {
+    try {
+      await page.waitForSelector(sel, { timeout: 4000 });
+      await page.click(sel);
+      chatOpened = true;
+      console.log(`[WhatsApp Call] Chat opened for "${displayName}"`);
+      break;
+    } catch {}
+  }
+
+  if (!chatOpened) {
+    await page.screenshot({ path: 'whatsapp-debug.png' });
+    throw new Error(`Contact "${contactName}" not found in search results. Screenshot saved.`);
+  }
+
+  await sleep(2000);
+
+  // ── Click call button ─────────────────────────────────────────────────────
+  const voiceSelectors = [
+    "[data-testid='voice-call-btn']",
+    "[aria-label='Voice call']",
+    "[title='Voice call']",
+    "span[data-icon='voice-call']",
+  ];
+  const videoSelectors = [
+    "[data-testid='video-call-btn']",
+    "[aria-label='Video call']",
+    "[title='Video call']",
+    "span[data-icon='video']",
+  ];
+
+  const selectors = callType === 'video' ? videoSelectors : voiceSelectors;
+  let callClicked = false;
+
+  for (const sel of selectors) {
+    try {
+      await page.waitForSelector(sel, { timeout: 5000 });
+      await page.click(sel);
+      callClicked = true;
+      console.log(`[WhatsApp Call] ✓ ${callType} call initiated to "${displayName}"`);
+      break;
+    } catch {}
+  }
+
+  if (!callClicked) {
+    await page.screenshot({ path: 'whatsapp-call-debug.png' });
+    throw new Error(`Could not find ${callType} call button. Screenshot saved as whatsapp-call-debug.png`);
+  }
+
+  await sleep(2000);
+  return {
+    success: true,
+    message: `${callType === 'video' ? 'Video' : 'Voice'} call initiated to ${displayName} on WhatsApp`,
+    to: displayName,
+  };
 }
