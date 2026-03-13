@@ -1,9 +1,9 @@
 'use client'
 import { useState, useRef, KeyboardEvent } from 'react'
 
-const EXAMPLE_PROMPTS = [
+const EXAMPLES = [
   "Open Chrome and search for the latest AI news",
-  "Create a folder called 'Projects' and make a Python hello world file inside it",
+  "Create a folder called 'Projects' and make a Python hello world file",
   "Open Notepad and type a motivational quote",
   "Search YouTube for lofi hip hop music",
   "Create a React component file for a login form",
@@ -16,130 +16,103 @@ interface PromptInputProps {
 }
 
 export default function PromptInput({ onSubmit, loading }: PromptInputProps) {
-  const [prompt, setPrompt] = useState('')
-  const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const [prompt, setPrompt]   = useState('')
+  const [focused, setFocused] = useState(false)
+  const ref = useRef<HTMLTextAreaElement>(null)
 
-  const handleSubmit = () => {
-    if (prompt.trim() && !loading) {
-      onSubmit(prompt.trim())
-    }
-  }
-
-  const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
-      handleSubmit()
-    }
-  }
-
-  const useExample = (example: string) => {
-    setPrompt(example)
-    textareaRef.current?.focus()
+  const submit = () => { if (prompt.trim() && !loading) onSubmit(prompt.trim()) }
+  const onKey  = (e: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); submit() }
   }
 
   return (
-    <div className="space-y-4">
-      {/* Main input */}
+    <div className="flex flex-col gap-4">
+
+      {/* Input */}
       <div className="relative">
-        <div className="absolute top-4 left-4 text-accent/60 font-mono text-sm select-none">
+        <span className="absolute top-[14px] left-[14px] font-mono text-sm text-cyan/50 select-none pointer-events-none">
           &gt;_
-        </div>
+        </span>
         <textarea
-          ref={textareaRef}
+          ref={ref}
           value={prompt}
-          onChange={(e) => setPrompt(e.target.value)}
-          onKeyDown={handleKeyDown}
+          onChange={e => setPrompt(e.target.value)}
+          onKeyDown={onKey}
+          onFocus={() => setFocused(true)}
+          onBlur={() => setFocused(false)}
           placeholder="Describe what you want to automate..."
           disabled={loading}
           rows={3}
-          className="
-            w-full bg-surface2 border border-border rounded-lg
-            pl-12 pr-4 pt-4 pb-4
-            text-white font-mono text-sm
+          className={`w-full bg-s3 rounded-[9px] pl-11 pr-4 pt-[14px] pb-[14px]
+            text-ntext font-sans text-[13px] leading-[1.55] resize-none outline-none
+            transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed
             placeholder:text-dim
-            focus:outline-none focus:border-accent/50 focus:bg-surface3
-            disabled:opacity-50 disabled:cursor-not-allowed
-            resize-none transition-all duration-200
-            hover:border-border/80
-          "
+            ${focused
+              ? 'border border-cyan/35 shadow-[0_0_0_1px_rgba(0,229,255,0.1),0_0_20px_rgba(0,229,255,0.05)]'
+              : 'border border-border2'
+            }`}
         />
-        <div className="absolute bottom-3 right-4 text-dim text-xs font-mono">
+        <span className="absolute bottom-[10px] right-3 font-mono text-[9px] text-dim">
           {prompt.length} chars
-        </div>
+        </span>
       </div>
 
       {/* Submit */}
       <div className="flex items-center gap-3">
         <button
-          onClick={handleSubmit}
+          onClick={submit}
           disabled={!prompt.trim() || loading}
-          className="
-            flex items-center gap-2 px-6 py-2.5
-            bg-accent/10 border border-accent/30 rounded-lg
-            text-accent font-mono text-sm font-medium
-            hover:bg-accent/20 hover:border-accent/50
-            disabled:opacity-40 disabled:cursor-not-allowed
-            transition-all duration-200
-            focus:outline-none focus:ring-1 focus:ring-accent/50
-          "
-          style={!prompt.trim() || loading ? {} : { boxShadow: '0 0 15px rgba(0,212,255,0.1)' }}
+          className={`flex items-center gap-2 px-5 py-[9px] rounded-[8px] font-mono text-[11px]
+            font-semibold tracking-[0.06em] transition-all duration-200
+            disabled:cursor-not-allowed disabled:opacity-40
+            ${prompt.trim() && !loading
+              ? 'bg-cyan/10 border border-cyan/30 text-cyan shadow-[0_0_15px_rgba(0,229,255,0.08)]'
+              : 'bg-s3 border border-border text-muted'
+            }`}
         >
           {loading ? (
             <>
-              <LoadingSpinner />
-              Generating Plan...
+              <svg className="spin-fast" width="11" height="11" viewBox="0 0 11 11" fill="none">
+                <circle cx="5.5" cy="5.5" r="4.5" stroke="#00e5ff" strokeWidth="1.4"
+                  strokeDasharray="9 18" strokeLinecap="round"/>
+              </svg>
+              GENERATING PLAN...
             </>
           ) : (
             <>
-              <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
-                <path
-                  d="M1 7H13M13 7L8 2M13 7L8 12"
-                  stroke="#00d4ff"
-                  strokeWidth="1.5"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                />
+              <svg width="11" height="11" viewBox="0 0 11 11" fill="none">
+                <path d="M1 5.5H10M10 5.5L6.5 2M10 5.5L6.5 9"
+                  stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/>
               </svg>
-              Generate Plan
+              GENERATE PLAN
             </>
           )}
         </button>
-        <span className="text-dim text-xs font-mono hidden md:block">⌘+Enter to submit</span>
+        <span className="font-mono text-[9.5px] text-dim tracking-[0.04em] hidden md:block">
+          ⌘+Enter to submit
+        </span>
       </div>
 
       {/* Examples */}
-      <div className="space-y-2">
-        <p className="text-dim text-xs font-mono">TRY AN EXAMPLE:</p>
-        <div className="flex flex-wrap gap-2">
-          {EXAMPLE_PROMPTS.map((ex, i) => (
+      <div className="flex flex-col gap-2">
+        <div className="font-mono text-[9.5px] text-muted tracking-[0.06em] uppercase">
+          Try an example:
+        </div>
+        <div className="flex flex-wrap gap-[6px]">
+          {EXAMPLES.map((ex, i) => (
             <button
               key={i}
-              onClick={() => useExample(ex)}
+              onClick={() => { setPrompt(ex); ref.current?.focus() }}
               disabled={loading}
-              className="
-                text-xs font-mono px-3 py-1.5
-                bg-surface2 border border-border rounded
-                text-muted hover:text-accent hover:border-accent/30
-                disabled:opacity-40
-                transition-all duration-150
-              "
+              className="font-mono text-[10px] px-[10px] py-1 bg-s3 border border-border
+                rounded-[6px] text-muted transition-all duration-150
+                hover:text-cyan hover:border-cyan/28 disabled:opacity-40 disabled:cursor-not-allowed"
             >
-              {ex.length > 45 ? ex.substring(0, 42) + '...' : ex}
+              {ex.length > 45 ? ex.slice(0, 42) + '...' : ex}
             </button>
           ))}
         </div>
       </div>
     </div>
-  )
-}
-
-function LoadingSpinner() {
-  return (
-    <svg className="animate-spin" width="12" height="12" viewBox="0 0 12 12" fill="none">
-      <circle
-        cx="6" cy="6" r="5"
-        stroke="#00d4ff" strokeWidth="1.5"
-        strokeLinecap="round" strokeDasharray="20" strokeDashoffset="10"
-      />
-    </svg>
   )
 }
