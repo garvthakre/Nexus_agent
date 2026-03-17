@@ -49,10 +49,10 @@ export type Capability =
   | 'download_file'
 
   // Utility
-  | 'wait';
+  | 'wait'
   | 'whatsapp_send'
-| 'whatsapp_get_chats';
- | 'whatsapp_call';
+  | 'whatsapp_get_chats'
+  | 'whatsapp_call';
 
 // ─── Step Parameters ──────────────────────────────────────────────────────────
 
