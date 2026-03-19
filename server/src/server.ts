@@ -18,7 +18,42 @@ import {
   ExecuteRequest,
   StopRequest,
   ReviewRequest,
+  PlanStep,
+  StepResult,
 } from './types';
+
+// ─── ENV VALIDATOR ────────────────────────────────────────────────────────────
+// FIX 4: Validate required env vars at startup so missing keys fail loudly
+// instead of crashing mysteriously on the first task.
+
+function validateEnv(): void {
+  const provider = (process.env.AI_PROVIDER ?? 'groq').toLowerCase();
+
+  const required: Record<string, string[]> = {
+    groq:      ['GROQ_API_KEY'],
+    anthropic: ['ANTHROPIC_API_KEY'],
+    openai:    ['OPENAI_API_KEY'],
+  };
+
+  const missing = (required[provider] ?? []).filter(
+    (k) => !process.env[k] || (process.env[k] ?? '').includes('your_')
+  );
+
+  if (missing.length > 0) {
+    console.error('\n❌ Missing required environment variables:');
+    missing.forEach((k) => console.error(`   ${k}`));
+    console.error('\nSteps to fix:');
+    console.error('  1. Copy server/.env.example to server/.env');
+    console.error(`  2. Fill in your ${provider.toUpperCase()} API key`);
+    console.error('  3. Restart the server\n');
+    process.exit(1);
+  }
+
+  console.log(`✓ Env valid — provider: ${provider}`);
+}
+
+// Run before anything else starts
+validateEnv();
 
 // ─── App Setup ────────────────────────────────────────────────────────────────
 
@@ -49,7 +84,6 @@ wss.on('connection', (ws: WebSocket) => {
 
 // ─── REST Routes ──────────────────────────────────────────────────────────────
 
-// Upgraded /api/health — now includes execution stats
 app.get('/api/health', async (_req: Request, res: Response) => {
   const stats = await getFailureStats();
   res.json({
@@ -60,12 +94,13 @@ app.get('/api/health', async (_req: Request, res: Response) => {
     avgSuccessRate: `${Math.round(stats.avgSuccess * 100)}%`,
     recentTrend:  stats.recentTrend,
     topFailures:  Object.entries(stats.byCapability)
-      .sort((a, b) => b[1] - a[1]).slice(0, 3)
-      .map(([cap, n]) => `${cap}(${n})`).join(', ') || 'none',
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 3)
+      .map(([cap, n]) => `${cap}(${n})`)
+      .join(', ') || 'none',
   });
 });
 
-// NEW: /api/logs — full failure stats for debugging
 app.get('/api/logs', async (_req: Request, res: Response) => {
   const stats = await getFailureStats();
   res.json(stats);
@@ -123,7 +158,10 @@ app.post('/api/execute', async (req: Request<object, object, ExecuteRequest>, re
 app.post('/api/stop', (req: Request<object, object, StopRequest>, res: Response) => {
   const { sessionId } = req.body;
   const session = sessions.get(sessionId);
-  if (session) { session.stopped = true; broadcast({ type: 'execution_stopped', sessionId }); }
+  if (session) {
+    session.stopped = true;
+    broadcast({ type: 'execution_stopped', sessionId });
+  }
   res.json({ status: 'stopped' });
 });
 
@@ -133,17 +171,15 @@ app.get('/api/session/:sessionId', (req: Request, res: Response) => {
   res.json(session);
 });
 
-// ─── Adaptive Execution Logic ─────────────────────────────────────────────────
+// ─── Execution Logic ──────────────────────────────────────────────────────────
 
 const MAX_RETRIES = 2;
-const executionStartTimes = new Map<string, number>();
 
 async function executeAllSteps(sessionId: string, session: Session): Promise<void> {
   const { plan } = session;
   const results: StepExecutionResult[] = [];
   let totalFailed = 0;
-  const startTime   = Date.now();
-  executionStartTimes.set(sessionId, startTime);
+  const startTime = Date.now();
 
   for (let i = 0; i < plan.steps.length; i++) {
     if (session.stopped) break;
@@ -154,22 +190,30 @@ async function executeAllSteps(sessionId: string, session: Session): Promise<voi
     broadcast({ type: 'step_start', sessionId, stepNumber: step.step_number, step });
 
     if (step.safety_risk === 'high') {
-      broadcast({ type: 'safety_check', sessionId, stepNumber: step.step_number, message: `High-risk step: ${step.description}` });
+      broadcast({
+        type:       'safety_check',
+        sessionId,
+        stepNumber: step.step_number,
+        message:    `High-risk step: ${step.description}`,
+      });
       await sleep(1000);
     }
 
     let lastError = '';
     let succeeded = false;
-    let retryCount = 0;
 
-    // ── Retry loop ──────────────────────────────────────────────────────────
+    // ── Retry loop ────────────────────────────────────────────────────────
     for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
       if (session.stopped) break;
 
       if (attempt > 0) {
-        retryCount++;
+        // FIX 3: Single tryAutoFixBeforeRetry call per retry.
+        // Original had a SECOND call specifically for run_shell_command
+        // right below this block — shell commands were getting patched
+        // twice, which corrupted already-fixed files on the second pass.
         const fixApplied = await tryAutoFixBeforeRetry(step, lastError, broadcast);
-         if (fixApplied) {
+
+        if (fixApplied) {
           broadcast({
             type: 'planning',
             message: `✓ Auto-fix applied (attempt ${attempt + 1}): ${fixApplied}`,
@@ -180,16 +224,11 @@ async function executeAllSteps(sessionId: string, session: Session): Promise<voi
             sessionId,
             stepNumber: step.step_number,
             message: `Retrying step ${step.step_number} (attempt ${attempt + 1}/${MAX_RETRIES + 1}) — no auto-fix found...`,
-          });}
+          });
+        }
+
         await sleep(1500 * attempt);
       }
-
-      if (attempt > 0 && step.capability === 'run_shell_command') {
-    const autoFix = await tryAutoFixBeforeRetry(step, lastError, session);
-    if (autoFix) {
-      broadcast({ type: 'planning', message: `Auto-fix applied: ${autoFix}` });
-    }
-  }
 
       const stepStartTime = Date.now();
 
@@ -197,12 +236,7 @@ async function executeAllSteps(sessionId: string, session: Session): Promise<voi
         const result   = await executeStep(step);
         const duration = Date.now() - stepStartTime;
 
-        results.push({
-          stepNumber: step.step_number,
-          success:    true,
-          result,
-          duration,
-        });
+        results.push({ stepNumber: step.step_number, success: true, result, duration });
         broadcast({ type: 'step_complete', sessionId, stepNumber: step.step_number, result, duration });
         succeeded = true;
         break;
@@ -211,97 +245,83 @@ async function executeAllSteps(sessionId: string, session: Session): Promise<voi
         console.warn(`[Executor] Step ${step.step_number} attempt ${attempt + 1} failed:`, lastError);
       }
     }
-if (!succeeded) {
-        broadcast({
-          type: "step_error",
-          sessionId,
-          stepNumber: step.step_number,
-          error: lastError,
-        });
-        results.push({ stepNumber: step.step_number, success: false, error: lastError });
-        totalFailed++;
 
-        // ── Week 2: Mid-Execution Re-Planning ──────────────────────────────────
-        // If this isn't the last step, try to generate a fresh plan from the
-        // current browser position instead of abandoning the whole task.
-        const isLastStep = i >= plan.steps.length - 1;
+    if (!succeeded) {
+      broadcast({ type: 'step_error', sessionId, stepNumber: step.step_number, error: lastError });
+      results.push({ stepNumber: step.step_number, success: false, error: lastError });
+      totalFailed++;
 
-        if (!isLastStep) {
-          const livePage = getLivePage();
+      // ── Mid-execution replanning ──────────────────────────────────────
+      const isLastStep = i >= plan.steps.length - 1;
 
-          if (livePage) {
-            try {
-              const pageUrl   = livePage.url();
-              const pageTitle = await livePage.title().catch(() => "");
+      if (!isLastStep) {
+        const livePage = getLivePage();
 
-              // Build context: what's done, what failed, what's still needed
-              const completedSteps = plan.steps.slice(0, i).map(s => ({
-                description: s.description,
-                capability:  s.capability,
+        if (livePage) {
+          try {
+            const pageUrl   = livePage.url();
+            const pageTitle = await livePage.title().catch(() => '');
+
+            const completedSteps = plan.steps.slice(0, i).map((s) => ({
+              description: s.description,
+              capability:  s.capability,
+            }));
+
+            const remainingGoal = plan.steps
+              .slice(i + 1)
+              .map((s) => s.description)
+              .join('; ');
+
+            broadcast({
+              type:    'planning',
+              message: `Step ${step.step_number} failed — re-planning from current page...`,
+            });
+
+            console.log(
+              `[Server] Attempting mid-execution replan after step ${step.step_number} failed.`
+            );
+
+            const newPlan = await replanFromStep(
+              plan.summary,
+              completedSteps,
+              step,
+              lastError,
+              pageUrl,
+              pageTitle,
+              remainingGoal,
+            );
+
+            if (newPlan && newPlan.steps.length > 0) {
+              const numberedNewSteps = newPlan.steps.map((s, idx) => ({
+                ...s,
+                step_number: step.step_number + idx + 1,
               }));
 
-              const remainingGoal = plan.steps
-                .slice(i + 1)
-                .map(s => s.description)
-                .join("; ");
+              plan.steps.splice(i + 1, plan.steps.length - (i + 1), ...numberedNewSteps);
 
+              broadcast({ type: 'plan_ready', sessionId, plan });
               broadcast({
-                type:    "planning",
-                message: `Step ${step.step_number} failed — re-planning from current page...`,
+                type:    'planning',
+                message: `Re-planned: ${newPlan.steps.length} new step${newPlan.steps.length !== 1 ? 's' : ''} generated`,
               });
 
               console.log(
-                `[Server] Attempting mid-execution replan after step ${step.step_number} failed.`
+                `[Server] Re-plan successful — inserted ${newPlan.steps.length} new steps. ` +
+                `Execution continues.`
               );
-
-              const newPlan = await replanFromStep(
-                plan.summary,
-                completedSteps,
-                step,
-                lastError,
-                pageUrl,
-                pageTitle,
-                remainingGoal,
-              );
-
-              if (newPlan && newPlan.steps.length > 0) {
-                // Renumber the new steps to continue from where we are
-                const numberedNewSteps = newPlan.steps.map((s, idx) => ({
-                  ...s,
-                  step_number: step.step_number + idx + 1,
-                }));
-
-                // Splice: remove all remaining steps, insert the new plan
-                plan.steps.splice(
-                  i + 1,
-                  plan.steps.length - (i + 1),
-                  ...numberedNewSteps,
-                );
-
-                broadcast({ type: "plan_ready", sessionId, plan });
-                broadcast({
-                  type:    "planning",
-                  message: `Re-planned: ${newPlan.steps.length} new step${newPlan.steps.length !== 1 ? "s" : ""} generated`,
-                });
-
-                console.log(
-                  `[Server] Re-plan successful — inserted ${newPlan.steps.length} new steps. ` +
-                  `Execution continues.`
-                );
-              } else {
-                console.warn("[Server] Re-plan returned no steps — continuing with original remaining steps");
-              }
-            } catch (replanErr) {
-              console.warn("[Server] Re-planning threw an error:", (replanErr as Error).message);
-              // Non-fatal: just continue with remaining original steps
+            } else {
+              console.warn('[Server] Re-plan returned no steps — continuing with original remaining steps');
             }
-          } else {
-            console.warn("[Server] getLivePage() returned null — cannot replan (no live browser context)");
+          } catch (replanErr) {
+            console.warn('[Server] Re-planning threw an error:', (replanErr as Error).message);
           }
+        } else {
+          console.warn('[Server] getLivePage() returned null — cannot replan (no live browser context)');
         }
-
-        await sleep(500);
       }
+
+      await sleep(500);
+    }
 
     await sleep(300);
   }
@@ -323,7 +343,6 @@ if (!succeeded) {
       },
     });
 
-    // ── Log the execution for analytics / self-improvement ────────────────
     await logExecution({
       timestamp:      new Date().toISOString(),
       sessionId,
@@ -346,21 +365,18 @@ if (!succeeded) {
       successRate:    results.length > 0
         ? (results.length - totalFailed) / results.length
         : 0,
-      durationMs:     totalDuration,
+      durationMs: totalDuration,
     });
   }
-
-  executionStartTimes.delete(sessionId);
 }
 
- 
 // ─── Adaptive Workarounds ─────────────────────────────────────────────────────
 
 async function tryAdaptiveWorkaround(
-  step: import('./types').PlanStep,
+  step: PlanStep,
   error: string,
   sessionId: string,
-): Promise<import('./types').StepResult | null> {
+): Promise<StepResult | null> {
   broadcast({
     type: 'planning',
     message: `Trying adaptive workaround for step ${step.step_number}...`,
@@ -394,7 +410,7 @@ async function tryAdaptiveWorkaround(
   return null;
 }
 
-async function openInSystemBrowser(url: string): Promise<import('./types').StepResult> {
+async function openInSystemBrowser(url: string): Promise<StepResult> {
   const { execAsync: exec2 } = await getExecAsync();
   const finalUrl = url.startsWith('http') ? url : `https://${url}`;
   if (process.platform === 'win32') {
@@ -408,7 +424,7 @@ async function openInSystemBrowser(url: string): Promise<import('./types').StepR
   return { success: true, url: finalUrl, message: `Opened ${finalUrl} in system default browser` };
 }
 
-async function openTextInNotepad(text: string, _sessionId: string): Promise<import('./types').StepResult> {
+async function openTextInNotepad(text: string, _sessionId: string): Promise<StepResult> {
   const { execAsync: exec2 } = await getExecAsync();
   const fs2   = await import('fs/promises');
   const os2   = await import('os');
@@ -421,7 +437,7 @@ async function openTextInNotepad(text: string, _sessionId: string): Promise<impo
   return { success: true, path: tmpFile, message: `Text written to ${tmpFile}` };
 }
 
-async function openViaShell(appName: string): Promise<import('./types').StepResult> {
+async function openViaShell(appName: string): Promise<StepResult> {
   const { execAsync: exec2 } = await getExecAsync();
   if (process.platform === 'win32') {
     try {
@@ -452,6 +468,6 @@ server.listen(PORT, () => {
   console.log(`
   HTTP : http://localhost:${PORT}
   WS   : ws://localhost:${PORT}
-  AI   : ${(process.env.AI_PROVIDER ?? 'groq').padEnd(32)}
+  AI   : ${(process.env.AI_PROVIDER ?? 'groq').padEnd(28)} 
   `);
 });
