@@ -1,35 +1,38 @@
 // ═══════════════════════════════════════════════════════════════════════════
 // NEXUS — Smart Auto-Fix System
-//  
 // ═══════════════════════════════════════════════════════════════════════════
 //
 // KEY INSIGHT: Retrying the same file with the same error = infinite loop.
 // The fix must PATCH THE SOURCE FILE before retrying, not just install deps.
 //
+// FIX: Replaced inline `import('./types').PlanStep` with proper top-level
+//      import. Both the interface definition AND the export signature now
+//      use the same imported type — no more dual-import inconsistency.
+//
+// FIX: Removed unused `analyzeError()` function that was dead code
+//      (a copy-paste leftover from planner.ts — it was never called here).
+//
 // Error → Fix mapping:
-//   ModuleNotFoundError    → pip install pkg  (already working ✓)
-//   UnicodeEncodeError     → rewrite file with encoding='utf-8' fix
-//   FileNotFoundError      → rewrite file with os.makedirs fix
-//   ConnectionError        → rewrite file with timeout + retry
-//   PermissionError        → rewrite file with different output path
-//   SyntaxError            → cannot auto-fix, let replan handle it
-//   Cannot find module     → npm install pkg  (already working ✓)
+//   ModuleNotFoundError  → pip install pkg
+//   UnicodeEncodeError   → patch open() calls with encoding='utf-8'
+//   FileNotFoundError    → add os.makedirs before file writes
+//   ConnectionError      → add timeout=15 to requests.get()
+//   SyntaxError          → return null so replanner rewrites the script
+//   Cannot find module   → npm install pkg
 
 import * as fs   from 'fs/promises';
 import * as path from 'path';
 import * as os   from 'os';
+import type { PlanStep } from '../types/index';
 
 // ─── Patch registry ───────────────────────────────────────────────────────────
-// Each entry: { test, fix } where:
-//   test: checks if this error matches
-//   fix:  applies the patch, returns a human-readable description or null if failed
 
 interface AutoFix {
   name: string;
   test: (error: string) => boolean;
   fix: (
     error: string,
-    step: import('../types/index').PlanStep,
+    step: PlanStep,
     broadcast: (msg: object) => void,
   ) => Promise<string | null>;
 }
@@ -40,7 +43,7 @@ const AUTO_FIXES: AutoFix[] = [
   {
     name: 'pip-install',
     test: (e) => /ModuleNotFoundError: No module named/.test(e),
-    fix: async (error, step, broadcast) => {
+    fix: async (error, _step, broadcast) => {
       const match = error.match(/ModuleNotFoundError: No module named '([^']+)'/);
       if (!match) return null;
       const pkg = match[1].split('.')[0]; // e.g. "bs4" from "bs4.element"
@@ -50,7 +53,6 @@ const AUTO_FIXES: AutoFix[] = [
         await execAsync(`pip install ${pkg} --quiet`, { timeout: 60_000 });
         return `pip install ${pkg}`;
       } catch {
-        // Try pip3
         try {
           const { execAsync } = await getExecAsync();
           await execAsync(`pip3 install ${pkg} --quiet`, { timeout: 60_000 });
@@ -63,26 +65,24 @@ const AUTO_FIXES: AutoFix[] = [
   },
 
   // ── Fix 2: UnicodeEncodeError → patch open() calls to use utf-8 ──────────
-  //
-  // Root cause: Windows uses cp1252 by default. Weather/web content has
-  // emoji or non-ASCII chars. Fix: add encoding='utf-8' to every open() call.
   {
     name: 'unicode-encoding',
     test: (e) => e.includes('UnicodeEncodeError') || e.includes('charmap'),
     fix: async (error, step, broadcast) => {
-      // Find the Python file that was being run
       const filePath = extractPythonFilePath(step);
       if (!filePath) return null;
 
-      broadcast({ type: 'planning', message: `Auto-fix: patching Unicode encoding in ${path.basename(filePath)}...` });
+      broadcast({
+        type: 'planning',
+        message: `Auto-fix: patching Unicode encoding in ${path.basename(filePath)}...`,
+      });
 
       try {
         let content = await fs.readFile(filePath, 'utf-8');
         let changed = false;
 
-        // Fix 1: open('file', 'w') → open('file', 'w', encoding='utf-8')
-        const openPattern = /open\(([^)]+),\s*['"]w['"]\)/g;
-        if (openPattern.test(content)) {
+        // open('file', 'w') → open('file', 'w', encoding='utf-8')
+        if (/open\([^)]+,\s*['"]w['"]\)/.test(content)) {
           content = content.replace(
             /open\(([^)]+),\s*['"]w['"]\)/g,
             "open($1, 'w', encoding='utf-8')"
@@ -90,26 +90,25 @@ const AUTO_FIXES: AutoFix[] = [
           changed = true;
         }
 
-        // Fix 2: open('file', 'a') → open('file', 'a', encoding='utf-8')
+        // open('file', 'a') → open('file', 'a', encoding='utf-8')
         content = content.replace(
           /open\(([^)]+),\s*['"]a['"]\)/g,
           "open($1, 'a', encoding='utf-8')"
         );
 
-        // Fix 3: open('file', 'r') → open('file', 'r', encoding='utf-8')
+        // open('file', 'r') → open('file', 'r', encoding='utf-8')
         content = content.replace(
           /open\(([^)]+),\s*['"]r['"]\)/g,
           "open($1, 'r', encoding='utf-8')"
         );
 
-        // Fix 4: Add PYTHONIOENCODING env at top of script if print() is used
+        // Add PYTHONIOENCODING env at top if print() is used
         if (content.includes('print(') && !content.includes('PYTHONIOENCODING')) {
           content = `import os\nos.environ['PYTHONIOENCODING'] = 'utf-8'\n` + content;
           changed = true;
         }
 
-        // Fix 5: Replace response.text with response.content.decode('utf-8')
-        // for requests responses being written to file
+        // Replace response.text writes with safe decode
         if (content.includes('response.text') && error.includes('UnicodeEncodeError')) {
           content = content.replace(
             /f\.write\(response\.text\)/g,
@@ -118,8 +117,8 @@ const AUTO_FIXES: AutoFix[] = [
           changed = true;
         }
 
+        // Generic fallback if nothing specific matched
         if (!changed) {
-          // Generic fallback: add encoding to all open() calls
           content = content.replace(
             /open\(([^,)]+)\)/g,
             "open($1, encoding='utf-8')"
@@ -148,7 +147,6 @@ const AUTO_FIXES: AutoFix[] = [
       try {
         let content = await fs.readFile(filePath, 'utf-8');
 
-        // Add os.makedirs before any open() call that writes a file
         if (!content.includes('os.makedirs')) {
           const dirMatch = error.match(/No such file or directory: '([^']+)'/);
           if (dirMatch) {
@@ -166,20 +164,22 @@ const AUTO_FIXES: AutoFix[] = [
     },
   },
 
-  // ── Fix 4: requests.ConnectionError → add timeout + error handling ────────
+  // ── Fix 4: requests.ConnectionError → add timeout ────────────────────────
   {
     name: 'connection-error',
     test: (e) => e.includes('ConnectionError') || e.includes('requests.exceptions'),
-    fix: async (error, step, broadcast) => {
+    fix: async (_error, step, broadcast) => {
       const filePath = extractPythonFilePath(step);
       if (!filePath) return null;
 
-      broadcast({ type: 'planning', message: `Auto-fix: adding timeout and error handling to network calls...` });
+      broadcast({
+        type: 'planning',
+        message: `Auto-fix: adding timeout and error handling to network calls...`,
+      });
 
       try {
         let content = await fs.readFile(filePath, 'utf-8');
 
-        // Add timeout to requests.get() calls
         content = content.replace(
           /requests\.get\(([^)]+)\)/g,
           (match, args) => {
@@ -187,11 +187,6 @@ const AUTO_FIXES: AutoFix[] = [
             return `requests.get(${args}, timeout=15)`;
           }
         );
-
-        // Add try/except around the whole script body if not already there
-        if (!content.includes('except requests.exceptions')) {
-          content += `\n# Auto-added error handling\n`;
-        }
 
         await fs.writeFile(filePath, content, 'utf-8');
         return `added timeout=15 to requests calls in ${path.basename(filePath)}`;
@@ -205,7 +200,7 @@ const AUTO_FIXES: AutoFix[] = [
   {
     name: 'npm-install',
     test: (e) => /Cannot find module '([^.][^']+)'/.test(e),
-    fix: async (error, step, broadcast) => {
+    fix: async (error, _step, broadcast) => {
       const match = error.match(/Cannot find module '([^.][^']+)'/);
       if (!match) return null;
       const pkg = match[1];
@@ -220,30 +215,32 @@ const AUTO_FIXES: AutoFix[] = [
     },
   },
 
-  // ── Fix 6: Python IndentationError → cannot auto-fix, force replan ───────
+  // ── Fix 6: Python SyntaxError → signal replanner to rewrite ──────────────
   {
     name: 'syntax-error-replan',
     test: (e) => e.includes('IndentationError') || e.includes('SyntaxError'),
-    fix: async (error, step, broadcast) => {
-      broadcast({ type: 'planning', message: `Auto-fix: syntax error detected — will rewrite script from scratch...` });
-      // Cannot patch syntax errors reliably. Return null so replan triggers.
-      // The replan will see the error and generate a corrected script.
+    fix: async (_error, _step, broadcast) => {
+      broadcast({
+        type: 'planning',
+        message: `Auto-fix: syntax error detected — will rewrite script from scratch...`,
+      });
+      // Return null so the mid-execution replanner in server.ts takes over.
+      // It will see the error message and generate a corrected script.
       return null;
     },
   },
 
 ];
 
-// ─── Helper: extract the Python file path from a shell command step ───────────
+// ─── Helper: extract Python file path from a shell command step ───────────────
+// FIX: Uses the top-level PlanStep import, not inline import('./types').PlanStep
 
-function extractPythonFilePath(step: import('./types').PlanStep): string | null {
+function extractPythonFilePath(step: PlanStep): string | null {
   const cmd = step.parameters?.command ?? '';
-  // Match: python ~/Desktop/foo/script.py  or  python3 C:\Users\...\script.py
   const match = cmd.match(/python3?\s+["']?([^\s"']+\.py)["']?/i);
   if (!match) return null;
 
   let filePath = match[1];
-  // Expand ~
   if (filePath.startsWith('~/') || filePath.startsWith('~\\')) {
     filePath = path.join(os.homedir(), filePath.slice(2));
   }
@@ -258,22 +255,10 @@ async function getExecAsync() {
   return { execAsync: promisify(exec) };
 }
 
-// ─── MAIN EXPORT: tryAutoFixBeforeRetry ──────────────────────────────────────
-//
-// Called in the retry loop in server.ts BEFORE each retry attempt.
-// Returns a description of what was fixed, or null if nothing could be done.
-//
-// Usage in server.ts executeAllSteps():
-//
-//   if (attempt > 0) {
-//     const fix = await tryAutoFixBeforeRetry(step, lastError, broadcast);
-//     if (fix) {
-//       broadcast({ type: 'planning', message: `✓ Auto-fix applied: ${fix}` });
-//     }
-//   }
+// ─── Main Export ──────────────────────────────────────────────────────────────
 
 export async function tryAutoFixBeforeRetry(
-  step: import('./types').PlanStep,
+  step: PlanStep,
   error: string,
   broadcast: (msg: object) => void,
 ): Promise<string | null> {
@@ -284,7 +269,7 @@ export async function tryAutoFixBeforeRetry(
       try {
         const result = await autoFix.fix(error, step, broadcast);
         if (result) {
-          console.log(`[AutoFix] ✓ Applied "${autoFix.name}": ${result}`);
+          console.log(`[AutoFix]  Applied "${autoFix.name}": ${result}`);
           return result;
         }
       } catch (fixErr) {
@@ -294,50 +279,4 @@ export async function tryAutoFixBeforeRetry(
   }
 
   return null;
-}
-function analyzeError(errorMessage: string): string[] {
-  const hints: string[] = [];
-
-  const missingModule = errorMessage.match(/ModuleNotFoundError: No module named '([^']+)'/);
-  if (missingModule) {
-    hints.push(`  - Python module "${missingModule[1]}" is not installed.`);
-    hints.push(`  - Fix: add _ensure("${missingModule[1]}") at top of script before importing.`);
-    return hints;
-  }
-
-  if (errorMessage.includes('UnicodeEncodeError') || errorMessage.includes('charmap')) {
-    hints.push(`  - Windows encoding error: the file was opened without encoding='utf-8'.`);
-    hints.push(`  - Fix: rewrite the script — add encoding='utf-8', errors='replace' to ALL open() calls.`);
-    hints.push(`  - Fix: for response.text, use: f.write(response.content.decode('utf-8', errors='replace'))`);
-    return hints;
-  }
-
-  if (errorMessage.includes('FileNotFoundError') || errorMessage.includes('No such file')) {
-    const dirMatch = errorMessage.match(/No such file or directory: '([^']+)'/);
-    hints.push(`  - Directory does not exist.`);
-    if (dirMatch) hints.push(`  - Fix: add os.makedirs('${path.dirname(dirMatch[1])}', exist_ok=True) before writing.`);
-    return hints;
-  }
-
-  if (errorMessage.includes('ConnectionError') || errorMessage.includes('requests.exceptions')) {
-    hints.push(`  - Network connection failed.`);
-    hints.push(`  - Fix: add timeout=15 to requests.get(), wrap in try/except.`);
-    return hints;
-  }
-
-  const nodeModule = errorMessage.match(/Cannot find module '([^.][^']+)'/);
-  if (nodeModule) {
-    hints.push(`  - Node module "${nodeModule[1]}" is not installed.`);
-    hints.push(`  - Fix: add npm install ${nodeModule[1]} as a run_shell_command step before running the script.`);
-    return hints;
-  }
-
-  if (errorMessage.includes('SyntaxError') || errorMessage.includes('IndentationError')) {
-    hints.push(`  - Python syntax error in the generated script.`);
-    hints.push(`  - Fix: rewrite the entire script from scratch with correct Python syntax.`);
-    return hints;
-  }
-
-  hints.push(`  - ${errorMessage.slice(0, 200)}`);
-  return hints;
 }
