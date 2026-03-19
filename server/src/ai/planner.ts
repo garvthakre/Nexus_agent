@@ -3,6 +3,7 @@ import Anthropic from '@anthropic-ai/sdk';
 import { Plan, Capability } from '../types';
 import { selectExamples, formatExamplesForPrompt } from './promptExamples';
 import type {  PlanStep } from '../types/index';
+import { getMemoryForPrompt } from '../utils/memory';
 // ─── Static System Prompt ─────────────────────────────────────────────────────
 
 const STATIC_SYSTEM_PROMPT = `You are a JSON compiler. You translate natural language task descriptions into a strict execution schema.
@@ -468,15 +469,17 @@ safety_risk: low = reversible/read-only | medium = hard-to-undo writes | high = 
 
 // ─── Dynamic prompt builder ───────────────────────────────────────────────────
 
-function buildSystemPrompt(userPrompt: string): string {
+// AFTER
+async function buildSystemPrompt(userPrompt: string): Promise<string> {
   const examples = selectExamples(userPrompt, 3);
   const examplesBlock = formatExamplesForPrompt(examples);
+  const memory = await getMemoryForPrompt();
 
-  if (!examplesBlock) return STATIC_SYSTEM_PROMPT;
+  const parts = [STATIC_SYSTEM_PROMPT];
+  if (memory) parts.push(memory);
+  if (examplesBlock) parts.push(examplesBlock);
 
-  return `${STATIC_SYSTEM_PROMPT}
-
-${examplesBlock}`;
+  return parts.join('\n\n');
 }
 
 // ─── Provider Implementations ─────────────────────────────────────────────────
@@ -489,7 +492,7 @@ async function planWithGroq(userPrompt: string): Promise<string> {
   const response = await client.chat.completions.create({
     model: process.env.GROQ_MODEL ?? 'llama-3.3-70b-versatile',
     messages: [
-      { role: 'system', content: buildSystemPrompt(userPrompt) },
+      { role: 'system', content:  await buildSystemPrompt(userPrompt) },
       { role: 'user',   content: userPrompt },
     ],
     temperature: 0.1,
