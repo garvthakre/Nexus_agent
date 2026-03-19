@@ -9,6 +9,7 @@ import { planTask , replanFromStep } from './ai/planner';
 import { reviewPlan } from './ai/reviewer';
 import { executeStep, getLivePage } from './executor/stepExecutor';
 import { logExecution, getFailureStats } from './utils/executionLogger';
+import { appendMemory } from './utils/memory';
 import {
   Plan,
   Session,
@@ -329,6 +330,7 @@ async function executeAllSteps(sessionId: string, session: Session): Promise<voi
   if (!session.stopped) {
     const successCount = results.filter((r) => r.success).length;
     const totalDuration = Date.now() - startTime;
+    const overallSuccess = totalFailed < results.length / 2;
     session.status = totalFailed === results.length ? 'failed' : 'completed';
 
     broadcast({
@@ -352,6 +354,7 @@ async function executeAllSteps(sessionId: string, session: Session): Promise<voi
       totalSteps:     plan.steps.length,
       steps:          results.map((r, idx) => ({
         stepNumber:   r.stepNumber,
+         
         capability:   plan.steps[idx]?.capability ?? 'unknown',
         description:  plan.steps[idx]?.description ?? '',
         success:      r.success,
@@ -361,12 +364,13 @@ async function executeAllSteps(sessionId: string, session: Session): Promise<voi
         pageUrl:      r.result?.url as string | undefined,
         strategy:     r.result?.strategy as string | undefined,
       })),
-      overallSuccess: totalFailed < results.length / 2,
+      overallSuccess,
       successRate:    results.length > 0
         ? (results.length - totalFailed) / results.length
         : 0,
       durationMs: totalDuration,
     });
+    await appendMemory(plan.intent, plan.summary, overallSuccess, plan.steps.length)
   }
 }
 
