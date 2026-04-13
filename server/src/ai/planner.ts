@@ -290,6 +290,29 @@ Message box:  div[contenteditable][data-tab='10']
 Send:         [data-testid='send']
 
 ═══════════════════════════════════════════════
+HTML / CSS / JS FILE RULES — CRITICAL
+═══════════════════════════════════════════════
+
+⚠ NEVER create separate .html, .css, .js files for web projects.
+  file:// protocol BLOCKS cross-file loading (CSS/JS won't load from separate files).
+
+ALWAYS create ONE single .html file with CSS in <style> and JS in <script> tags inline.
+
+WRONG — will not work:
+  create_file { path: "Desktop/calculator.html", content: "..." }
+  create_file { path: "Desktop/calculator.css",  content: "..." }   ← BANNED
+  create_file { path: "Desktop/calculator.js",   content: "..." }   ← BANNED
+
+CORRECT — always one file:
+  create_file { path: "Desktop/calculator.html", content: "<!DOCTYPE html>...<style>...FULL CSS HERE...</style>...<script>...FULL JS HERE...</script>" }
+  run_shell_command { command: "start ~/Desktop/calculator.html" }
+
+⚠ create_file content MUST be the COMPLETE working code — never placeholders like
+  "<!-- HTML code here -->" or "// JS code here" or "/* CSS here */".
+  Write every line of real, working code. The file must work when opened.
+  Minimum expected size: 500+ characters for any UI component.
+  
+═══════════════════════════════════════════════
 PATH RULES
 ═══════════════════════════════════════════════
 
@@ -351,7 +374,7 @@ EXCEPT LinkedIn — see LinkedIn rules above.
   YouTube     → wait for "ytd-video-renderer" after search
 
 LINKEDIN EXCEPTION — do NOT add any wait step for LinkedIn jobs.
-  browser_extract_results handles its own internal wait for job cards.
+  browser_extract_results has its own internal wait for LinkedIn job cards.
   Adding browser_wait_for_element for LinkedIn will ALWAYS fail and cause infinite replanning.
 
 NEVER use browser_extract_results immediately after browser_open on SPAs (except LinkedIn).
@@ -469,7 +492,6 @@ safety_risk: low = reversible/read-only | medium = hard-to-undo writes | high = 
 
 // ─── Dynamic prompt builder ───────────────────────────────────────────────────
 
-// AFTER
 async function buildSystemPrompt(userPrompt: string): Promise<string> {
   const examples = selectExamples(userPrompt, 3);
   const examplesBlock = formatExamplesForPrompt(examples);
@@ -574,7 +596,6 @@ function validatePlan(raw: string): Plan {
     if (!step.safety_risk) step.safety_risk = 'low';
     step.step_number = i + 1;
 
-    // Warn if create_file is being used for xlsx (should use Python instead)
     if (step.capability === 'create_file') {
       const p = step.parameters.path ?? '';
       if (p.endsWith('.xlsx') || p.endsWith('.xls')) {
@@ -586,7 +607,6 @@ function validatePlan(raw: string): Plan {
       }
     }
 
-    // Warn if browser_fill is targeting Bing search input (should use URL instead)
     if (step.capability === 'browser_fill') {
       const sel = step.parameters.selector ?? '';
       if (sel.includes("name='q'") || sel.includes('name="q"')) {
@@ -597,8 +617,6 @@ function validatePlan(raw: string): Plan {
 
   if (plan.confidence == null) plan.confidence = 85;
 
-  // ── Auto-remove open_application for browsers — causes double window problem
-  // browser_open already launches Chrome/Edge, so open_application is redundant
   const BROWSER_NAMES = ['chrome', 'edge', 'firefox', 'safari', 'browser', 'google chrome', 'microsoft edge'];
   const hadBrowserOpen = plan.steps.some(s => s.capability === 'open_application' &&
     BROWSER_NAMES.some(b => (s.parameters?.app_name ?? '').toLowerCase().includes(b)));
@@ -611,9 +629,6 @@ function validatePlan(raw: string): Plan {
     plan.steps.forEach((s, i) => s.step_number = i + 1);
   }
 
-  // ── Auto-remove bad LinkedIn wait steps — .jobs-search-results-list never exists.
-  // browser_extract_results has its own internal wait for LinkedIn job cards.
-  // Keeping this step causes infinite replanning loops.
   const BANNED_LINKEDIN_SELECTORS = [
     'jobs-search-results-list',
     'jobs-search-results__list',
@@ -690,7 +705,20 @@ export async function replanFromStep(
   currentPageUrl:   string,
   currentPageTitle: string,
   remainingGoal:    string,
+  // ── NEW: pass in URLs that are permanently bot-blocked this session ──
+  blockedUrls:      string[] = [],
 ): Promise<Plan | null> {
+
+  // ── Build a blocked-URL warning block for the prompt ──────────────────────
+  const blockedBlock = blockedUrls.length > 0
+    ? [
+        '',
+        'BOT-BLOCKED URLS — DO NOT USE ANY OF THESE IN YOUR NEW PLAN:',
+        ...blockedUrls.map(u => `  - ${u}`),
+        'Skip these entirely. Use only the data already collected or pick a different result index.',
+        '',
+      ].join('\n')
+    : '';
 
   const prompt = [
     `ORIGINAL GOAL: ${originalSummary}`,
@@ -705,16 +733,18 @@ export async function replanFromStep(
     `CURRENT BROWSER STATE:`,
     `  Page title: "${currentPageTitle}"`,
     `  Page URL:   ${currentPageUrl}`,
-    '',
+    blockedBlock,
     `REMAINING GOAL: ${remainingGoal}`,
     '',
     `ERROR ANALYSIS:`,
-    ...analyzeError(errorMessage),
+    ...analyzeError(errorMessage, currentPageUrl, blockedUrls),
     '',
     `Generate a NEW plan starting from the CURRENT PAGE (above) to achieve the remaining goal.`,
     `- Number your steps starting from 1`,
     `- Do NOT repeat the already-completed steps`,
     `- Do NOT attempt to redo the failed step the same way — find an alternative approach`,
+    `- NEVER open any URL listed in BOT-BLOCKED URLS above`,
+    `- If bot-blocked URLs are search results, use a HIGHER index (e.g. results_3_url, results_4_url)`,
     `- Only use capabilities that are available`,
     `- If the remaining goal is already achieved based on the current page, return a single`,
     `  "browser_read_page" step to confirm it`,
@@ -723,7 +753,8 @@ export async function replanFromStep(
   console.log(
     `[Replanner] Generating new plan after "${failedStep.description}" failed.\n` +
     `  Current page: "${currentPageTitle}" at ${currentPageUrl}\n` +
-    `  Completed: ${completedSteps.length} steps | Remaining goal: "${remainingGoal.slice(0, 80)}"`
+    `  Completed: ${completedSteps.length} steps | Remaining goal: "${remainingGoal.slice(0, 80)}"` +
+    (blockedUrls.length > 0 ? `\n  Blocked URLs: ${blockedUrls.join(', ')}` : '')
   );
 
   try {
@@ -731,6 +762,30 @@ export async function replanFromStep(
 
     if (!newPlan || !newPlan.steps || newPlan.steps.length === 0) {
       console.warn('[Replanner] AI returned an empty plan — will not replan');
+      return null;
+    }
+
+    // ── POST-VALIDATION: strip any steps that still reference blocked URLs ──
+    if (blockedUrls.length > 0) {
+      const before = newPlan.steps.length;
+      newPlan.steps = newPlan.steps.filter(step => {
+        const url = step.parameters?.url ?? '';
+        const isBlocked = blockedUrls.some(blocked =>
+          url.includes(new URL(blocked).hostname)
+        );
+        if (isBlocked) {
+          console.warn(`[Replanner] Stripped blocked URL step: ${url}`);
+        }
+        return !isBlocked;
+      });
+      if (newPlan.steps.length !== before) {
+        newPlan.steps.forEach((s, i) => s.step_number = i + 1);
+        console.log(`[Replanner] Stripped ${before - newPlan.steps.length} blocked-URL steps from new plan`);
+      }
+    }
+
+    if (newPlan.steps.length === 0) {
+      console.warn('[Replanner] All new steps were blocked URLs — cannot replan');
       return null;
     }
 
@@ -746,10 +801,34 @@ export async function replanFromStep(
   }
 }
 
-function analyzeError(errorMessage: string): string[] {
+// ─── FIX: analyzeError now accepts currentPageUrl and blockedUrls ─────────────
+
+function analyzeError(
+  errorMessage: string,
+  currentPageUrl: string = '',
+  blockedUrls: string[] = [],
+): string[] {
   const hints: string[] = [];
 
-  // Python missing module
+  // ── NEW: Bot detection — most important case ──────────────────────────────
+  if (
+    errorMessage.toLowerCase().includes('bot detection') ||
+    errorMessage.toLowerCase().includes('bot_detection') ||
+    errorMessage.toLowerCase().includes('just a moment') ||
+    errorMessage.toLowerCase().includes('cloudflare') ||
+    errorMessage.toLowerCase().includes('access denied')
+  ) {
+    const blockedDomain = currentPageUrl
+      ? (() => { try { return new URL(currentPageUrl).hostname; } catch { return currentPageUrl; } })()
+      : 'this site';
+    hints.push(`  - "${blockedDomain}" has permanent bot/Cloudflare protection that cannot be bypassed.`);
+    hints.push(`  - DO NOT retry this URL or any URL on the same domain.`);
+    hints.push(`  - Instead: skip to the NEXT search result index (results_3_url or results_4_url).`);
+    hints.push(`  - If enough articles were already collected, proceed directly to create_file + run_shell_command.`);
+    return hints;
+  }
+
+  // ── Python missing module ─────────────────────────────────────────────────
   const missingModule = errorMessage.match(/ModuleNotFoundError: No module named '([^']+)'/);
   if (missingModule) {
     hints.push(`  - Python module "${missingModule[1]}" is not installed.`);
@@ -758,7 +837,7 @@ function analyzeError(errorMessage: string): string[] {
     return hints;
   }
 
-  // Node missing module
+  // ── Node missing module ───────────────────────────────────────────────────
   const nodeModule = errorMessage.match(/Cannot find module '([^']+)'/);
   if (nodeModule) {
     hints.push(`  - Node module "${nodeModule[1]}" is not installed.`);
@@ -766,21 +845,21 @@ function analyzeError(errorMessage: string): string[] {
     return hints;
   }
 
-  // Permission denied
+  // ── Permission denied ─────────────────────────────────────────────────────
   if (errorMessage.includes('Permission denied') || errorMessage.includes('EACCES')) {
     hints.push(`  - Permission denied. The file or directory is not writable.`);
     hints.push(`  - Fix: try a different path, or check file permissions.`);
     return hints;
   }
 
-  // File not found
+  // ── File not found ────────────────────────────────────────────────────────
   if (errorMessage.includes('No such file') || errorMessage.includes('ENOENT')) {
     hints.push(`  - A required file was not found.`);
     hints.push(`  - Fix: verify the file path is correct and the create_file step ran successfully.`);
     return hints;
   }
 
-  // Command not found
+  // ── Command not found ─────────────────────────────────────────────────────
   if (errorMessage.includes('not recognized') || errorMessage.includes('command not found')) {
     hints.push(`  - The command was not found on this system.`);
     hints.push(`  - Fix: check if the program is installed, or use an alternative command.`);
