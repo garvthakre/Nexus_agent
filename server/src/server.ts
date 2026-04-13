@@ -22,7 +22,7 @@ import {
   PlanStep,
   StepResult,
 } from './types';
-
+  import { markUrlBlocked, getBlockedUrls, isUrlBlocked } from './executor/blockedUrlTracker';
 // ─── ENV VALIDATOR ────────────────────────────────────────────────────────────
 // FIX 4: Validate required env vars at startup so missing keys fail loudly
 // instead of crashing mysteriously on the first task.
@@ -174,6 +174,19 @@ app.get('/api/session/:sessionId', (req: Request, res: Response) => {
 
 // ─── Execution Logic ──────────────────────────────────────────────────────────
 
+ 
+
+/**
+ * PATCH for server.ts — executeAllSteps function
+ * 
+ * Replace the existing executeAllSteps function in server/src/server.ts
+ * with this version. Three changes marked with ── NEW ──
+ *
+ *  
+ */
+
+// ─── Execution Logic ──────────────────────────────────────────────────────────
+
 const MAX_RETRIES = 2;
 
 async function executeAllSteps(sessionId: string, session: Session): Promise<void> {
@@ -200,6 +213,34 @@ async function executeAllSteps(sessionId: string, session: Session): Promise<voi
       await sleep(1000);
     }
 
+    // ── NEW: Skip immediately if this step targets a known blocked URL ───────
+    if (step.capability === 'browser_open' && step.parameters?.url) {
+      const resolvedUrl = step.parameters.url.replace(/\{\{([^}]+)\}\}/g, (match, key) => {
+        // We can't resolve templates here, but we can check the raw URL
+        return match;
+      });
+      // Only check non-template URLs
+      if (!resolvedUrl.includes('{{')) {
+        const { isUrlBlocked } = await import('./executor/blockedUrlTracker');
+        if (isUrlBlocked(resolvedUrl)) {
+          console.log(`[Server] Skipping known bot-blocked URL: ${resolvedUrl}`);
+          broadcast({
+            type: 'safety_check',
+            sessionId,
+            stepNumber: step.step_number,
+            message: `Skipping bot-blocked URL: ${resolvedUrl}`,
+          });
+          results.push({
+            stepNumber: step.step_number,
+            success: false,
+            error: `Skipped — URL is bot-blocked this session: ${resolvedUrl}`,
+          });
+          totalFailed++;
+          continue;
+        }
+      }
+    }
+
     let lastError = '';
     let succeeded = false;
 
@@ -208,10 +249,6 @@ async function executeAllSteps(sessionId: string, session: Session): Promise<voi
       if (session.stopped) break;
 
       if (attempt > 0) {
-        // FIX 3: Single tryAutoFixBeforeRetry call per retry.
-        // Original had a SECOND call specifically for run_shell_command
-        // right below this block — shell commands were getting patched
-        // twice, which corrupted already-fixed files on the second pass.
         const fixApplied = await tryAutoFixBeforeRetry(step, lastError, broadcast);
 
         if (fixApplied) {
@@ -226,6 +263,16 @@ async function executeAllSteps(sessionId: string, session: Session): Promise<voi
             stepNumber: step.step_number,
             message: `Retrying step ${step.step_number} (attempt ${attempt + 1}/${MAX_RETRIES + 1}) — no auto-fix found...`,
           });
+        }
+
+        // ── NEW: Don't retry bot-blocked steps — fail fast ───────────────
+        if (
+          lastError.toLowerCase().includes('bot detection') ||
+          lastError.toLowerCase().includes('bot_detection') ||
+          lastError.toLowerCase().includes('just a moment')
+        ) {
+          console.log(`[Server] Bot detection confirmed on attempt ${attempt + 1} — not retrying further`);
+          break;
         }
 
         await sleep(1500 * attempt);
@@ -244,6 +291,28 @@ async function executeAllSteps(sessionId: string, session: Session): Promise<voi
       } catch (err: unknown) {
         lastError = (err as Error).message;
         console.warn(`[Executor] Step ${step.step_number} attempt ${attempt + 1} failed:`, lastError);
+
+        // ── NEW: Register bot-blocked URL immediately on first detection ──
+        if (
+          lastError.toLowerCase().includes('bot detection') ||
+          lastError.toLowerCase().includes('bot_detection')
+        ) {
+          const { markUrlBlocked } = await import('./executor/blockedUrlTracker');
+          // Extract the blocked URL from the error message
+          const urlMatch = lastError.match(/Bot detection active on (https?:\/\/[^\s]+)/);
+          const blockedUrl = urlMatch ? urlMatch[1] : (step.parameters?.url ?? '');
+          if (blockedUrl) {
+            markUrlBlocked(blockedUrl);
+            broadcast({
+              type: 'safety_check',
+              sessionId,
+              stepNumber: step.step_number,
+              message: `Bot-blocked URL registered: ${new URL(blockedUrl).hostname} — will skip in future steps`,
+            });
+          }
+          // Don't waste retries on a blocked URL — break immediately
+          break;
+        }
       }
     }
 
@@ -282,6 +351,14 @@ async function executeAllSteps(sessionId: string, session: Session): Promise<voi
               `[Server] Attempting mid-execution replan after step ${step.step_number} failed.`
             );
 
+            // ── NEW: Pass blocked URLs into the replanner ─────────────────
+            const { getBlockedUrls } = await import('./executor/blockedUrlTracker');
+            const currentBlockedUrls = getBlockedUrls();
+
+            if (currentBlockedUrls.length > 0) {
+              console.log(`[Server] Passing ${currentBlockedUrls.length} blocked URL(s) to replanner: ${currentBlockedUrls.join(', ')}`);
+            }
+
             const newPlan = await replanFromStep(
               plan.summary,
               completedSteps,
@@ -290,6 +367,7 @@ async function executeAllSteps(sessionId: string, session: Session): Promise<voi
               pageUrl,
               pageTitle,
               remainingGoal,
+              currentBlockedUrls,  // ← NEW: pass blocked URLs
             );
 
             if (newPlan && newPlan.steps.length > 0) {
@@ -354,7 +432,6 @@ async function executeAllSteps(sessionId: string, session: Session): Promise<voi
       totalSteps:     plan.steps.length,
       steps:          results.map((r, idx) => ({
         stepNumber:   r.stepNumber,
-         
         capability:   plan.steps[idx]?.capability ?? 'unknown',
         description:  plan.steps[idx]?.description ?? '',
         success:      r.success,
@@ -370,7 +447,7 @@ async function executeAllSteps(sessionId: string, session: Session): Promise<voi
         : 0,
       durationMs: totalDuration,
     });
-    await appendMemory(plan.intent, plan.summary, overallSuccess, plan.steps.length)
+    await appendMemory(plan.intent, plan.summary, overallSuccess, plan.steps.length);
   }
 }
 
