@@ -20,6 +20,7 @@ export interface ExampleStep {
   capability: string;
   parameters: Record<string, unknown>;
   safety_risk: 'low' | 'medium' | 'high';
+  description?: string;
 }
 
 export interface PlanExample {
@@ -143,7 +144,6 @@ export function selectExamples(prompt: string, topN: number = 3): PlanExample[] 
 
 function formatStep(step: ExampleStep, index: number): string {
   // For create_file steps, replace long content with a stub to save prompt tokens.
-  // The AI must GENERATE the actual file content itself — not copy it from examples.
   const params = { ...step.parameters };
   if (step.capability === 'create_file' && typeof params.content === 'string' && params.content.length > 100) {
     params.content = '<WRITE FULL FILE CONTENT HERE — do not leave empty>';
@@ -153,7 +153,7 @@ function formatStep(step: ExampleStep, index: number): string {
     capability: step.capability,
     parameters: params,
     safety_risk: step.safety_risk,
-    description: `Step ${index + 1}`,
+    description: step.description ?? `${step.capability.replace(/_/g, ' ')}`,
   }, null, 2);
 }
 
