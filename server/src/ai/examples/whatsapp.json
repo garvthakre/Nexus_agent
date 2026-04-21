@@ -7,7 +7,8 @@
       {
         "capability": "whatsapp_call",
         "parameters": { "contact": "[contact]", "call_type": "voice" },
-        "safety_risk": "low"
+        "safety_risk": "low",
+        "description": "Start a WhatsApp voice call"
       }
     ]
   },
@@ -19,7 +20,8 @@
       {
         "capability": "whatsapp_call",
         "parameters": { "contact": "[contact]", "call_type": "voice" },
-        "safety_risk": "low"
+        "safety_risk": "low",
+        "description": "Search and call contact on WhatsApp"
       }
     ]
   },
@@ -31,7 +33,8 @@
       {
         "capability": "whatsapp_call",
         "parameters": { "contact": "[contact]", "call_type": "video" },
-        "safety_risk": "low"
+        "safety_risk": "low",
+        "description": "Start a WhatsApp video call"
       }
     ]
   }
