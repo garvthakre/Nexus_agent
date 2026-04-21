@@ -279,11 +279,11 @@ function TimelineStep({
         className={`flex-1 ml-[10px] relative overflow-hidden transition-all duration-300
           ${isLast ? '' : 'mb-[3px]'}
           rounded-[9px]
-          ${pending ? 'opacity-[0.38] cursor-default' : 'cursor-pointer'}
+          ${pending ? 'cursor-default' : 'cursor-pointer'}
         `}
         style={{
-          background: running ? 'linear-gradient(135deg,#0c0c18,#131320)' : '#0c0c18',
-          border: `1px solid ${running ? c + '44' : error ? 'rgba(255,61,90,0.3)' : 'rgba(255,255,255,0.055)'}`,
+          background: running ? 'linear-gradient(135deg,#0c0c18,#131320)' : pending ? '#131320' : '#0c0c18',
+          border: `1px solid ${running ? c + '44' : error ? 'rgba(255,61,90,0.3)' : pending ? 'rgba(255,255,255,0.12)' : 'rgba(255,255,255,0.055)'}`,
           boxShadow: running ? `0 0 18px ${c}14` : 'none',
         }}
       >
@@ -306,10 +306,11 @@ function TimelineStep({
 
           <div className="flex-1 min-w-0">
             <div className={`font-sans text-[12.5px] font-medium truncate
-              ${running ? 'text-white' : done ? 'text-ntext' : 'text-muted'}`}>
+              ${running ? 'text-white' : done ? 'text-ntext' : pending ? 'text-ntext' : 'text-muted'}`}>
               {step.description}
             </div>
-            <div className="font-mono text-[9.5px] text-muted mt-[1px]">{step.capability}</div>
+            <div className={`font-mono text-[9.5px] mt-[1px]
+              ${pending ? 'text-muted' : 'text-muted'}`}>{step.capability}</div>
           </div>
 
           <div className="flex items-center gap-[7px] flex-shrink-0">
