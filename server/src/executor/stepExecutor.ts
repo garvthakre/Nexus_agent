@@ -635,10 +635,23 @@ async function browserReadPage(
 
   const result = `Title: ${title}\nURL: ${url}\n\n${summary}`;
   if (variableName) {
+    // Store the full blob — existing templates use {{article1}} directly
     articleStore[variableName] = result;
-    console.log(`[browserReadPage] Stored "${variableName}": ${result.length} chars`);
+ 
+    // Auto-populate split keys so Excel/any template can use fields separately.
+    // browserReadPage always produces the same internal format so this works
+ 
+    // The AI planner can now use {{article1_title}}, {{article1_url}},
+    // {{article1_summary}} without needing a parse step in the Python script.
+    articleStore[`${variableName}_title`]   = title;
+    articleStore[`${variableName}_url`]     = url;
+    articleStore[`${variableName}_summary`] = summary;
+ 
+    console.log(
+      `[browserReadPage] Stored "${variableName}" + split keys ` +
+      `(_title, _url, _summary): ${result.length} chars`
+    );
   }
-
   return {
     success: true,
     message: `Summarized: "${title}"`,
@@ -1125,14 +1138,26 @@ async function createFile(filePath: string | undefined, content: string): Promis
       const key = tpl.slice(2, -2).trim();
       if (store[key]) {
         let val = store[key];
-        if ((filePath ?? '').endsWith('.py')) {
-          val = val
-            .replace(/\\/g, '\\\\')
-            .replace(/'/g, "\\'")
-            .replace(/"/g, '\\"')
-            .replace(/\r?\n/g, '\\n')
-            .replace(/\t/g, '\\t');
-        }
+ if ((filePath ?? '').endsWith('.py')) {
+        // Escape special characters so injected value is valid inside a
+        // Python single-quoted string literal.
+        //
+        // NOTE: The \n → \\n replacement is INTENTIONAL — do NOT remove it.
+        // On Windows, os.homedir() can contain spaces in the username
+        // (e.g. "C:\Users\garv thakre"). PowerShell's buildVisibleCmdScript
+        // wraps the path in quotes to handle that. If real newlines existed
+        // inside the injected string, Python would see an unterminated string
+        // literal and crash. Escaping to \\n keeps the content on one logical
+        // line in the Python source file. parse_article() in the generated
+        // script then converts \\n back to real newlines before writing to
+        // the Excel cell, so the final cell content is always correct.
+        val = val
+          .replace(/\\/g, '\\\\')
+          .replace(/'/g, "\\'")
+          .replace(/"/g, '\\"')
+          .replace(/\r?\n/g, '\\n')   // intentional — see NOTE above
+          .replace(/\t/g, '\\t');
+      }
         resolvedContent = resolvedContent.split(tpl).join(val);
         console.log(`[createFile] Resolved {{${key}}} (${store[key].length} chars)`);
       } else {

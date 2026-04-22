@@ -101,13 +101,31 @@ export async function humanWriteFile(
  *     the space in "garv thakre" so python only receives "C:\Users\garv"
  *     as the file argument. Fix: wrap the path in double-quotes.
  *
- * THE FIX:
- *   1. Quote any path argument that contains spaces.
- *   2. Send the WHOLE command string in ONE SendKeys call instead of
- *      char-by-char. This is atomic — no timing/focus race condition.
- *   3. Wait 2000ms (not 1000ms) for CMD to fully open before sending.
- *   4. Use clipboard paste (Set-Clipboard + SendKeys "^v") as the
- *      most reliable way to get the full command into CMD intact.
+ *   Bug 4 — here-string terminator crash (THE CURRENT BUG):
+ *     The old approach used a PowerShell here-string (@'...'@) and put
+ *     the command inside it via Set-Clipboard. PowerShell here-strings
+ *     require the closing '@ to be on its OWN line with NOTHING before it.
+ *     If the command string itself contained a newline followed by '@ —
+ *     which can happen when the generated Python script has single-quoted
+ *     strings like 'solid', 'FFFFFF', 'top', 'utf-8' etc. and those leak
+ *     into the here-string — PowerShell terminates early and throws:
+ *       "The string is missing the terminator: '@"
+ *     This broke every Excel task that used parse_article() because the
+ *     generated Python has many more single-quoted string literals.
+ *
+ * THE FIX — temp file approach:
+ *   Instead of putting the command into a here-string, we write it to a
+ *   temp .txt file using Out-File (which handles ALL special characters
+ *   safely including single quotes, double quotes, backslashes, newlines).
+ *   Then we read it back via Get-Content and Set-Clipboard, and paste
+ *   into CMD with Ctrl+V. This is completely immune to quote/terminator
+ *   issues because the command never appears inside a PowerShell string
+ *   literal at all — it goes straight to disk and back.
+ *
+ *   On Windows, os.homedir() can contain spaces in the username
+ *   (e.g. "C:\Users\garv thakre"). The path quoting logic below handles
+ *   that by wrapping any path argument that contains spaces in double-quotes
+ *   before the command is written to the temp file.
  */
 export function buildVisibleCmdScript(command: string): string {
   // Step 1: Quote any unquoted path argument that contains spaces.
@@ -126,23 +144,40 @@ export function buildVisibleCmdScript(command: string): string {
     }
   )
 
-  // Step 2: Escape single-quotes for the outer PowerShell here-string.
-  // We use Set-Clipboard with a here-string (@'...'@) which is immune
-  // to ALL special characters — backslashes, quotes, spaces, everything.
-  // The command is pasted into CMD via Ctrl+V, not typed char by char.
-  // This completely eliminates the timing/focus race condition.
+  // Step 2: Write the command to a temp file instead of a here-string.
+  //
+  // WHY TEMP FILE:
+  //   PowerShell here-strings (@'...'@) crash if the content contains
+  //   a newline immediately followed by '@ — which generated Python scripts
+  //   trigger because they have many single-quoted string literals.
+  //   Out-File writes the raw string to disk with no quoting at all,
+  //   so no special characters can break the PowerShell syntax.
+  //
+  // The temp file path uses a timestamp to avoid collisions between
+  // concurrent NEXUS tasks. It is deleted after use to stay clean.
 
   const reviewPause = 400 + Math.floor(Math.random() * 200)
 
-  // Use @'...'@ (PowerShell here-string) — nothing inside needs escaping.
-  // Then paste into CMD with Ctrl+V via SendKeys "^v".
+  // Escape the command for use inside a PowerShell double-quoted string
+  // (only needed for the Out-File line — backslashes and double-quotes).
+  // Single quotes do NOT need escaping inside double-quoted PS strings.
+  const escapedForPs = fixedCommand
+    .replace(/\\/g, '\\\\')   // backslash → double backslash
+    .replace(/"/g, '\\"')     // double-quote → escaped double-quote
+
+  const tmpFile = `$env:TEMP\\nexus_cmd_${Date.now()}.txt`
+
   const lines = [
-    // Write command to clipboard using here-string (safe for all special chars)
-    `Set-Clipboard -Value @'\n${fixedCommand}\n'@`,
+    // Write command to temp file — safe for ALL special characters
+    `"${escapedForPs}" | Out-File -FilePath "${tmpFile}" -Encoding utf8 -NoNewline`,
+    // Read it back and put in clipboard
+    `Set-Clipboard -Value (Get-Content -Path "${tmpFile}" -Raw)`,
+    // Clean up temp file immediately
+    `Remove-Item -Path "${tmpFile}" -Force -ErrorAction SilentlyContinue`,
     // Open CMD visibly
     `$wsh = New-Object -ComObject WScript.Shell`,
     `$proc = Start-Process cmd.exe -WindowStyle Normal -PassThru`,
-    // Wait longer — 2000ms ensures CMD is fully ready before we send keys
+    // Wait for CMD to fully open before sending keys
     `Start-Sleep -Milliseconds 2000`,
     `$wsh.AppActivate($proc.Id)`,
     `Start-Sleep -Milliseconds 600`,
