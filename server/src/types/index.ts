@@ -98,9 +98,11 @@ export interface StepParameters {
 // ─── Plan Step ────────────────────────────────────────────────────────────────
 
 export interface PlanStep {
+  step_number: number;
   capability: Capability;
   parameters: StepParameters;
   description: string;
+  safety_risk?: 'low' | 'medium' | 'high';
 }
 
 
@@ -109,6 +111,10 @@ export interface PlanStep {
 export interface Plan {
   steps: PlanStep[];
   reasoning?: string;
+  intent?: string;
+  summary?: string;
+  confidence?: number;
+  requires_confirmation?: boolean;
 }
 
 
@@ -126,6 +132,84 @@ export interface StepResult {
   strategy?: string;       // Which tier/selector won (for logging)
   error?: string;
   path ?: string;          // For screenshots or files
+  [key: string]: unknown;  // Allow additional properties from executors
+}
+
+
+// ─── Session ──────────────────────────────────────────────────────────────────
+
+export interface Session {
+  plan: Plan;
+  status: string;
+  currentStep: number;
+  stopped: boolean;
+}
+
+
+// ─── WebSocket Message Types ──────────────────────────────────────────────────
+
+export type WsMessageType =
+  | 'connected'
+  | 'planning'
+  | 'plan_ready'
+  | 'execution_start'
+  | 'step_start'
+  | 'step_complete'
+  | 'step_error'
+  | 'safety_check'
+  | 'execution_complete'
+  | 'execution_failed'
+  | 'execution_stopped'
+  | 'error';
+
+export interface WsMessage {
+  type: WsMessageType;
+  message?: string;
+  sessionId?: string;
+  plan?: Plan;
+  totalSteps?: number;
+  stepNumber?: number;
+  step?: PlanStep;
+  result?: StepResult;
+  duration?: number;
+  error?: string;
+  results?: StepExecutionResult[];
+  summary?: {
+    total: number;
+    success: number;
+    failed: number;
+    duration: number;
+  };
+}
+
+
+// ─── Step Execution Result ────────────────────────────────────────────────────
+
+export interface StepExecutionResult {
+  stepNumber: number;
+  success: boolean;
+  result?: StepResult;
+  error?: string;
+  duration?: number;
+}
+
+
+// ─── Request Body Types ───────────────────────────────────────────────────────
+
+export interface PlanRequest {
+  prompt: string;
+}
+
+export interface ExecuteRequest {
+  sessionId: string;
+}
+
+export interface StopRequest {
+  sessionId: string;
+}
+
+export interface ReviewRequest {
+  plan: Plan;
 }
 
 
