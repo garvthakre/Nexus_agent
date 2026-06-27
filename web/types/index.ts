@@ -95,9 +95,11 @@ export interface StepParameters {
 // ─── Plan Step ────────────────────────────────────────────────────────────────
 
 export interface PlanStep {
+  step_number: number;
   capability: Capability;
   parameters: StepParameters;
   description: string;
+  safety_risk?: 'low' | 'medium' | 'high';
 }
 
 
@@ -106,6 +108,10 @@ export interface PlanStep {
 export interface Plan {
   steps: PlanStep[];
   reasoning?: string;
+  intent?: string;
+  summary?: string;
+  confidence?: number;
+  requires_confirmation?: boolean;
 }
 
 
@@ -122,6 +128,84 @@ export interface StepResult {
   warning?: string;
   strategy?: string;       // Which tier/selector won (for logging)
   error?: string;
+  path?: string;
+  [key: string]: unknown;
+}
+
+export interface StepExecutionResult {
+  stepNumber: number;
+  success: boolean;
+  result?: StepResult;
+  error?: string;
+  duration?: number;
+}
+
+export interface ReviewResult {
+  verdict: 'SAFE' | 'UNSAFE' | 'REVIEW_REQUIRED';
+  confidence: number;
+  risks: string[];
+  safe_steps: number[];
+  risky_steps: number[];
+  recommendation: string;
+}
+
+export interface ExecutionSummary {
+  total: number;
+  success: number;
+  failed: number;
+  duration: number;
+}
+
+export type StepStatus = 'pending' | 'running' | 'complete' | 'error'
+
+export interface ExecutionState {
+  status: 'idle' | 'executing' | 'completed' | 'failed' | 'stopped'
+  currentStep: number | null
+  completedSteps: number[]
+  failedStep: number | null
+  stepResults: Record<number, StepResult>
+  summary: ExecutionSummary | null
+}
+
+export interface ActivityEvent {
+  type: WsMessageType
+  message: string
+  time: string
+}
+
+export type WsMessageType =
+  | 'connected'
+  | 'planning'
+  | 'plan_ready'
+  | 'execution_start'
+  | 'step_start'
+  | 'step_complete'
+  | 'step_error'
+  | 'safety_check'
+  | 'execution_complete'
+  | 'execution_failed'
+  | 'execution_stopped'
+  | 'error'
+
+export interface WsMessage {
+  type: WsMessageType
+  message?: string
+  sessionId?: string
+  plan?: Plan
+  totalSteps?: number
+  stepNumber?: number
+  step?: PlanStep
+  result?: StepResult
+  duration?: number
+  error?: string
+  results?: Array<{
+    stepNumber: number
+    success: boolean
+    result?: StepResult
+    error?: string
+    duration?: number
+  }>
+  summary?: ExecutionSummary
 }
 
 
