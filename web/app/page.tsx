@@ -39,55 +39,51 @@ export default function HomePage() {
 
           <div className="flex flex-col gap-4">
             {!plan && (
-              <div className="mb-1">
-                <h1 className="font-display text-[38px] tracking-[0.06em] text-ntext leading-none mb-[6px]">
-                  WHAT SHOULD I <span className="text-cyan">AUTOMATE</span>?
+              <div className="mb-2">
+                <h1 className="font-display text-[32px] font-600 text-ntext leading-tight mb-2">
+                  What would you like to automate?
                 </h1>
-                <p className="font-mono text-[11px] text-muted tracking-[0.04em]">
-                  Describe your task in plain English. NEXUS will generate and execute an intelligent plan.
+                <p className="text-[14px] text-muted leading-relaxed">
+                  Describe your task in plain English. Nexus will generate and execute an intelligent plan.
                 </p>
               </div>
             )}
 
             {plan && (
-              <div className="flex items-center gap-[10px]">
+              <div className="flex items-center gap-2 mb-2">
                 <button
                   onClick={handleNew}
-                  className="font-mono text-[10px] text-dim hover:text-cyan transition-colors bg-transparent border-none cursor-pointer tracking-[0.04em] px-2 py-1 rounded-[5px]"
+                  className="text-[14px] text-cyan hover:text-ntext transition-colors bg-transparent border-none cursor-pointer px-2 py-1 rounded hover:bg-s1"
                 >
-                  ← NEW TASK
+                  ← Back
                 </button>
-                <span className="text-dim font-mono text-[10px]">/</span>
-                <span className="font-mono text-[10px] text-muted tracking-[0.04em]">EXECUTION PLAN</span>
               </div>
             )}
 
             {!plan && (
-              <div className="bg-s1 border border-border rounded-[13px] p-5">
+              <div className="bg-s1 border border-border rounded-lg p-5">
                 <PromptInput onSubmit={handlePlan} loading={loading} />
               </div>
             )}
 
             {loading && (
-              <div className="bg-s1 border border-border rounded-[13px] p-5">
-                <div className="flex items-center gap-[10px] font-mono text-[11px] text-muted mb-[14px]">
-                  <div className="flex gap-1">
-                    {[0,1,2].map((k) => (
-                      <span key={k} className={`w-[5px] h-[5px] bg-cyan rounded-full inline-block dot-b${k}`} />
-                    ))}
-                  </div>
+              <div className="bg-s1 border border-border rounded-lg p-5">
+                <div className="flex items-center gap-2 text-[14px] text-muted mb-4">
+                  <svg className="spin-fast" width="16" height="16" viewBox="0 0 16 16" fill="none">
+                    <circle cx="8" cy="8" r="6" stroke="currentColor" strokeWidth="2" strokeDasharray="12 24" strokeLinecap="round"/>
+                  </svg>
                   Generating execution plan...
                 </div>
                 <div className="flex flex-col gap-2">
                   {[80,60,70,40].map((w, i) => (
-                    <div key={i} className="shimmer-skeleton h-[14px] rounded-[4px]" style={{ width: `${w}%` }} />
+                    <div key={i} className="h-3 rounded bg-s2" style={{ width: `${w}%` }} />
                   ))}
                 </div>
               </div>
             )}
 
             {plan && !loading && (
-              <div className="bg-s1 border border-border rounded-[13px] p-5">
+              <div className="bg-s1 border border-border rounded-lg p-5">
                 <PlanDisplay
                   plan={plan}
                   executionState={exec}
@@ -112,12 +108,7 @@ export default function HomePage() {
         </div>
       </main>
 
-      <footer className="border-t border-border py-3 px-6 mt-4">
-        <div className="max-w-[1400px] mx-auto flex items-center justify-between font-mono text-[9.5px] text-dim tracking-[0.05em]">
-          <span>NEXUS AI AUTOMATION AGENT · v2.0</span>
-          <span>TypeScript · Next.js · Groq · WebSocket</span>
-        </div>
-      </footer>
+
     </div>
   )
 }
