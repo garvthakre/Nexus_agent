@@ -62,59 +62,47 @@ export default function PlanDisplay({ plan, executionState, onConfirm, onStop, r
   return (
     <div className="flex flex-col gap-4 slide-up-anim">
 
-      {/* ── Plan header ── */}
-      <div className="bg-s2 border border-border rounded-[11px] p-4">
-        <div className="flex items-start justify-between gap-4">
-          <div className="flex-1 min-w-0">
-            <div className="flex items-center gap-2 mb-[6px] flex-wrap">
-              <span className="font-mono text-[9px] text-muted uppercase tracking-[0.07em]">Intent</span>
-              {plan.intent && (
-                <span className="font-mono text-[10px] text-cyan bg-cyan/8 border border-cyan/20 px-2 py-[2px] rounded-[5px]">
-                  {plan.intent}
-                </span>
-              )}
-            </div>
-            <p className="font-sans text-[13px] text-ntext leading-[1.5] mb-3">
-              {plan.summary ?? plan.reasoning}
-            </p>
-            <div className="flex items-center gap-4 font-mono text-[10px] text-muted flex-wrap">
-              <span><span className="text-ntext">{total}</span> STEPS</span>
-              <span><span className="text-green">{steps.filter((s: PlanStep) => s.safety_risk === 'low').length}</span> LOW</span>
-              <span><span className="text-amber">{steps.filter((s: PlanStep) => s.safety_risk === 'medium').length}</span> MED</span>
-              <span><span className="text-red">{steps.filter((s: PlanStep) => s.safety_risk === 'high').length}</span> HIGH</span>
-              {plan.requires_confirmation && (
-                <span className="text-amber ml-auto">⚠ REQUIRES CONFIRMATION</span>
-              )}
-            </div>
-          </div>
-          {plan.confidence && (
-            <div className="text-right flex-shrink-0">
-              <div className="font-display text-[32px] text-cyan leading-none">{plan.confidence}%</div>
-              <div className="font-mono text-[8px] text-muted mt-0.5 tracking-[0.06em]">CONFIDENCE</div>
+      {/* Plan header */}
+      <div className="bg-s2 border border-border rounded-lg p-4">
+        <div className="flex-1">
+          {plan.intent && (
+            <div className="mb-2">
+              <span className="text-xs text-muted font-500">Intent</span>
+              <div className="text-xs text-cyan bg-cyan/10 border border-cyan/20 px-2 py-1 rounded mt-1 inline-block">
+                {plan.intent}
+              </div>
             </div>
           )}
+          <p className="text-sm text-ntext leading-relaxed mb-3">
+            {plan.summary ?? plan.reasoning}
+          </p>
+          <div className="flex items-center gap-6 text-xs text-muted">
+            <span><span className="text-ntext font-500">{total}</span> steps</span>
+            <span><span className="text-green font-500">{steps.filter((s: PlanStep) => s.safety_risk === 'low').length}</span> low risk</span>
+            <span><span className="text-amber font-500">{steps.filter((s: PlanStep) => s.safety_risk === 'medium').length}</span> medium risk</span>
+            <span><span className="text-red font-500">{steps.filter((s: PlanStep) => s.safety_risk === 'high').length}</span> high risk</span>
+            {plan.requires_confirmation && (
+              <span className="text-amber ml-auto">⚠ Requires confirmation</span>
+            )}
+          </div>
         </div>
       </div>
 
-      {/* ── Progress bar ── */}
+      {/* Progress bar */}
       {(isExec || isDone) && (
-        <div className={`bg-s2 rounded-[11px] p-3 border
-          ${isExec ? 'border-cyan/20 glow-pulse-anim' : 'border-green/20'}`}>
+        <div className={`bg-s2 rounded-lg p-3 border ${isDone ? 'border-green/20' : 'border-border'}`}>
           <div className="flex items-center justify-between mb-2">
-            <span className={`font-mono text-[10px] tracking-[0.06em] ${isDone ? 'text-green' : 'text-cyan'}`}>
-              {isDone ? '✓ EXECUTION COMPLETE' : `EXECUTING · STEP ${executionState.currentStep} / ${total}`}
+            <span className={`text-xs font-500 ${isDone ? 'text-green' : 'text-cyan'}`}>
+              {isDone ? '✓ Execution complete' : `Step ${executionState.currentStep} of ${total}`}
             </span>
-            <span className={`font-display text-[22px] leading-none ${isDone ? 'text-green' : 'text-cyan'}`}>
-              {done}<span className="text-[14px] text-dim">/{total}</span>
+            <span className={`text-sm font-600 ${isDone ? 'text-green' : 'text-cyan'}`}>
+              {done}/{total}
             </span>
           </div>
-          <div className="h-[3px] bg-dim rounded-full overflow-hidden">
+          <div className="h-2 bg-s1 rounded-full overflow-hidden">
             <div
-              className={`h-full rounded-full transition-[width] duration-500 ease-[cubic-bezier(0.4,0,0.2,1)]
-                ${isDone
-                  ? 'bg-gradient-to-r from-green to-[#00cc77]'
-                  : 'bg-gradient-to-r from-cyan to-[#0090cc] shadow-[0_0_8px_#00e5ff]'
-                }`}
+              className={`h-full rounded-full transition-[width] duration-500
+                ${isDone ? 'bg-green' : 'bg-cyan'}`}
               style={{ width: `${pct}%` }}
             />
           </div>
@@ -124,21 +112,21 @@ export default function PlanDisplay({ plan, executionState, onConfirm, onStop, r
       {/* ── Safety review ── */}
       {review && <SafetyBanner review={review} />}
 
-      {/* ── Steps ── */}
+      {/* Steps */}
       <div>
         <div className="flex items-center justify-between mb-3">
-          <div className="font-display text-[14px] tracking-[0.1em] text-ntext">EXECUTION PLAN</div>
+          <h2 className="text-sm font-600 text-ntext">Execution plan</h2>
           <button
             onClick={() => setShowJson(!showJson)}
-            className="font-mono text-[9.5px] text-dim hover:text-cyan transition-colors px-2 py-[2px]"
+            className="text-xs text-dim hover:text-cyan transition-colors px-2 py-1"
           >
-            {showJson ? 'HIDE JSON' : 'VIEW JSON'}
+            {showJson ? 'Hide debug' : 'Show debug'}
           </button>
         </div>
 
         {showJson ? (
-          <div className="bg-s2 border border-border rounded-[9px] p-4 overflow-auto max-h-72">
-            <pre className="font-mono text-[10.5px] text-muted whitespace-pre-wrap m-0">
+          <div className="bg-s2 border border-border rounded-lg p-3 overflow-auto max-h-72">
+            <pre className="bg-pink font-mono text-xs text-muted whitespace-pre-wrap m-0">
               {JSON.stringify(plan, null, 2)}
             </pre>
           </div>
@@ -163,14 +151,13 @@ export default function PlanDisplay({ plan, executionState, onConfirm, onStop, r
         <SummaryCard summary={executionState.summary} failed={isFail} />
       )}
 
-      {/* ── Action buttons ── */}
+      {/* Action buttons */}
       {!isExec && !isDone && (
-        <div className="flex items-center gap-3 flex-wrap">
+        <div className="flex items-center gap-2 flex-wrap">
           <button
             onClick={onConfirm}
             disabled={review?.verdict === 'UNSAFE' || reviewing}
-            className={`flex items-center gap-2 px-[22px] py-[9px] rounded-[8px]
-              font-mono text-[11px] font-semibold tracking-[0.06em] transition-all duration-200
+            className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-500 transition-all duration-200
               disabled:opacity-50 disabled:cursor-not-allowed
               ${review?.verdict === 'UNSAFE' || reviewing
                 ? 'bg-s3 border border-border text-muted'
@@ -179,19 +166,18 @@ export default function PlanDisplay({ plan, executionState, onConfirm, onStop, r
           >
             {reviewing ? (
               <>
-                <svg className="spin-fast" width="11" height="11" viewBox="0 0 11 11" fill="none">
-                  <circle cx="5.5" cy="5.5" r="4.5" stroke="#00ffa3" strokeWidth="1.4"
-                    strokeDasharray="9 18" strokeLinecap="round"/>
+                <svg className="spin-fast" width="14" height="14" viewBox="0 0 16 16" fill="none">
+                  <circle cx="8" cy="8" r="6" stroke="currentColor" strokeWidth="2" strokeDasharray="12 24" strokeLinecap="round"/>
                 </svg>
-                REVIEWING SAFETY...
+                Checking safety...
               </>
             ) : (
-              <><span>▶</span> EXECUTE PLAN</>
+              <>Execute plan</>
             )}
           </button>
           {isFail && (
-            <span className="font-mono text-[10px] text-red">
-              ✗ Stopped at step {executionState.failedStep}
+            <span className="text-xs text-red">
+              Failed at step {executionState.failedStep}
             </span>
           )}
         </div>
@@ -200,12 +186,10 @@ export default function PlanDisplay({ plan, executionState, onConfirm, onStop, r
       {isExec && (
         <button
           onClick={onStop}
-          className="flex items-center gap-2 px-[22px] py-[9px] rounded-[8px]
-            font-mono text-[11px] font-semibold tracking-[0.06em]
-            bg-red/10 border border-red/30 text-red transition-all duration-200
-            hover:bg-red/20 hover:border-red/50"
+          className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-500
+            bg-red text-white transition-all duration-200 hover:bg-red/90"
         >
-          <span>■</span> STOP EXECUTION
+          Stop execution
         </button>
       )}
     </div>
@@ -224,109 +208,76 @@ function TimelineStep({
   const done    = status === 'complete'
   const error   = status === 'error'
   const pending = status === 'pending'
-  const c = capColor(step.capability)
 
   return (
-    <div className={`flex gap-0`} style={{ animationDelay: `${index * 0.04}s` }}>
+    <div className="flex gap-0">
 
       {/* Spine */}
-      <div className="flex flex-col items-center w-[38px] flex-shrink-0">
+      <div className="flex flex-col items-center w-8 flex-shrink-0">
         <div className="relative z-[2]">
-          {running && (
-            <div
-              className="absolute -inset-[5px] rounded-full border pulse-ring-anim pointer-events-none"
-              style={{ borderColor: c }}
-            />
-          )}
           <div
-            className="w-[26px] h-[26px] rounded-full flex items-center justify-center text-[10px] transition-all duration-300"
+            className="w-6 h-6 rounded-full flex items-center justify-center text-xs font-500 transition-all duration-300 flex-shrink-0"
             style={{
-              background: done ? c : error ? '#ff3d5a' : running ? 'transparent' : '#131320',
-              border: `1.5px solid ${done || running ? c : error ? '#ff3d5a' : '#252540'}`,
-              boxShadow: done || running ? `0 0 10px ${c}55` : 'none',
+              background: done ? '#28a745' : error ? '#dc3545' : running ? 'transparent' : '#f0f0f0',
+              border: `2px solid ${done ? '#28a745' : error ? '#dc3545' : running ? '#0066cc' : '#e0e0e0'}`,
+              color: done ? 'white' : error ? 'white' : running ? '#0066cc' : '#999',
             }}
           >
             {done ? (
-              <span className="text-[11px] success-pop-anim" style={{ color: '#03030a' }}>✓</span>
+              <span>✓</span>
             ) : error ? (
-              <span className="text-[10px]" style={{ color: '#03030a' }}>✗</span>
+              <span>✗</span>
             ) : running ? (
-              <svg className="spin-fast" width="13" height="13" viewBox="0 0 13 13" fill="none">
-                <circle cx="6.5" cy="6.5" r="5" stroke={c} strokeWidth="1.4"
-                  strokeDasharray="10 20" strokeLinecap="round"/>
+              <svg className="spin-fast" width="12" height="12" viewBox="0 0 16 16" fill="none">
+                <circle cx="8" cy="8" r="6" stroke="currentColor" strokeWidth="2" strokeDasharray="12 24" strokeLinecap="round"/>
               </svg>
             ) : (
-              <span className="font-mono text-[8px] text-muted">{step.step_number}</span>
+              <span>{step.step_number}</span>
             )}
           </div>
         </div>
 
         {!isLast && (
-          <div className="flex-1 w-[1.5px] bg-dim relative overflow-hidden min-h-[16px]">
-            {done && (
-              <div
-                className="absolute inset-0 line-fill-anim"
-                style={{ background: `linear-gradient(to bottom, ${c}, ${c}77)` }}
-              />
-            )}
-          </div>
+          <div className="flex-1 w-0.5 bg-border relative overflow-hidden min-h-3" />
         )}
       </div>
 
       {/* Card */}
       <div
         onClick={() => !pending && setOpen(o => !o)}
-        className={`flex-1 ml-[10px] relative overflow-hidden transition-all duration-300
-          ${isLast ? '' : 'mb-[3px]'}
-          rounded-[9px]
+        className={`flex-1 ml-3 relative transition-all duration-300 rounded-lg border
           ${pending ? 'cursor-default' : 'cursor-pointer'}
+          ${done ? 'bg-green/5 border-green/20' : error ? 'bg-red/5 border-red/20' : running ? 'bg-cyan/5 border-cyan/20' : 'bg-white border-border'}
         `}
-        style={{
-          background: running ? 'linear-gradient(135deg,#0c0c18,#131320)' : pending ? '#131320' : '#0c0c18',
-          border: `1px solid ${running ? c + '44' : error ? 'rgba(255,61,90,0.3)' : pending ? 'rgba(255,255,255,0.12)' : 'rgba(255,255,255,0.055)'}`,
-          boxShadow: running ? `0 0 18px ${c}14` : 'none',
-        }}
       >
-        {/* Shimmer scan on running */}
-        {running && (
-          <div
-            className="absolute inset-0 pointer-events-none shimmer-run"
-            style={{ background: `linear-gradient(90deg, transparent, ${c}09, transparent)` }}
-          />
-        )}
-
         {/* Row */}
-        <div className="flex items-center gap-[9px] px-3 py-[9px]">
-          <span
-            className="text-[15px] leading-none flex-shrink-0"
-            style={{ filter: running ? `drop-shadow(0 0 5px ${c})` : 'none' }}
-          >
-            {CAP_ICON[step.capability] ?? '⚡'}
-          </span>
-
-          <div className="flex-1 min-w-0">
-            <div className={`font-sans text-[12.5px] font-medium truncate
-              ${running ? 'text-white' : done ? 'text-ntext' : pending ? 'text-ntext' : 'text-muted'}`}>
-              {step.description}
-            </div>
-            <div className={`font-mono text-[9.5px] mt-[1px]
-              ${pending ? 'text-muted' : 'text-muted'}`}>{step.capability}</div>
+        <div className="flex items-center gap-3 px-3 py-2.5">
+          <div className="w-6 h-6 rounded-md bg-s2 flex items-center justify-center text-sm flex-shrink-0">
+            {CAP_ICON[step.capability] ?? '⚙️'}
           </div>
 
-          <div className="flex items-center gap-[7px] flex-shrink-0">
+          <div className="flex-1 min-w-0">
+            <div className={`text-sm font-500 truncate
+              ${running ? 'text-cyan' : done ? 'text-green' : error ? 'text-red' : 'text-ntext'}`}>
+              {step.description}
+            </div>
+            <div className="text-xs text-muted mt-0.5">{step.capability}</div>
+          </div>
+
+          <div className="flex items-center gap-2 flex-shrink-0">
             {step.safety_risk && (
-              <span className={`font-mono text-[9px] px-[6px] py-[1.5px] rounded-[4px] border
-                ${step.safety_risk === 'high'   ? 'text-red   bg-red/10   border-red/22'   :
-                  step.safety_risk === 'medium' ? 'text-amber bg-amber/10 border-amber/22' :
-                                                  'text-green bg-green/8  border-green/18' }`}>
+              <span className={`text-xs px-2 py-1 rounded border
+                ${step.safety_risk === 'high'   ? 'text-red bg-red/10 border-red/20'   :
+                  step.safety_risk === 'medium' ? 'text-amber bg-amber/10 border-amber/20' :
+                                                  'text-green bg-green/10 border-green/20' }`}>
                 {step.safety_risk}
               </span>
             )}
-            {running && <span className="font-mono text-[10px]" style={{ color: c }}>RUNNING...</span>}
-            {done    && <span className="font-mono text-[10px] text-green">✓ DONE</span>}
-            {error   && <span className="font-mono text-[10px] text-red">✗ FAILED</span>}
+            {running && <span className="text-xs text-cyan font-500">Running...</span>}
+            {done    && <span className="text-xs text-green font-500">✓ Done</span>}
+            {error   && <span className="text-xs text-red font-500">✗ Failed</span>}
             {!pending && (
-              <span className="text-dim text-[9px]">{open ? '▲' : '▼'}</span>
+              <span className="text-muted text-xs">{open ? '▲' : '▼'}</span>
             )}
           </div>
         </div>
@@ -336,39 +287,30 @@ function TimelineStep({
           <div className="border-t border-border px-3 py-2 slide-up-anim">
             {running && (
               <div className="flex items-center gap-2">
-                <div className="flex gap-1">
-                  {[0,1,2].map(k => (
-                    <span key={k} className={`w-1 h-1 rounded-full dot-b${k}`}
-                      style={{ background: c, display: 'inline-block' }} />
-                  ))}
-                </div>
-                <span className="font-mono text-[11px]" style={{ color: c }}>Processing...</span>
+                <svg className="spin-fast" width="12" height="12" viewBox="0 0 16 16" fill="none">
+                  <circle cx="8" cy="8" r="6" stroke="currentColor" strokeWidth="2" strokeDasharray="12 24" strokeLinecap="round"/>
+                </svg>
+                <span className="text-xs text-cyan">Processing...</span>
               </div>
             )}
             {done && result && (
-              <div className="flex flex-col gap-[6px]">
-                <div className="font-mono text-[11px] text-muted">
-                  <span className="text-green">✓</span>&nbsp;Step completed
+              <div className="flex flex-col gap-2">
+                <div className="text-xs text-muted">
+                  <span className="text-green">✓</span> Step completed
                   {result.message && <span className="ml-2">· {result.message}</span>}
                 </div>
                 {result.warning && (
-                  <div className="font-mono text-[10px] text-amber bg-amber/7 border border-amber/18 rounded-[6px] px-2 py-[5px]">
+                  <div className="text-xs text-amber bg-amber/10 border border-amber/20 rounded px-2 py-1.5">
                     ⚠ {result.warning}
                   </div>
                 )}
-                <div className="font-mono text-[10px] text-green bg-s3 border border-border rounded-[6px] p-2 max-h-24 overflow-auto">
-                  <pre className="m-0 whitespace-pre-wrap">{JSON.stringify(result, null, 2)}</pre>
-                </div>
               </div>
             )}
             {error && (
-              <div className="font-mono text-[11px] text-red">
+              <div className="text-xs text-red">
                 ✗ Step failed — check activity log for details
               </div>
             )}
-            <div className="font-mono text-[10px] text-dim mt-2 break-all">
-              PARAMS: {JSON.stringify(step.parameters).slice(0, 120)}...
-            </div>
           </div>
         )}
       </div>
@@ -380,23 +322,23 @@ function TimelineStep({
 function SafetyBanner({ review }: { review: ReviewResult }) {
   const ok = review.verdict === 'SAFE', bad = review.verdict === 'UNSAFE'
   return (
-    <div className={`rounded-[9px] p-[10px_14px] border
-      ${bad ? 'border-red/30   bg-red/6'   :
-        ok  ? 'border-green/25 bg-green/5' :
-              'border-amber/28 bg-amber/6' }`}>
-      <div className={`flex items-center gap-2 font-mono text-[11px] font-semibold flex-wrap
+    <div className={`rounded-lg p-3 border
+      ${bad ? 'border-red/20 bg-red/10'   :
+        ok  ? 'border-green/20 bg-green/10' :
+              'border-amber/20 bg-amber/10' }`}>
+      <div className={`flex items-center gap-2 text-xs font-500 flex-wrap
         ${bad ? 'text-red' : ok ? 'text-green' : 'text-amber'}
-        ${review.recommendation ? 'mb-[6px]' : ''}`}>
-        <span>{bad ? '✗' : ok ? '✓' : '⚠'} AI SAFETY REVIEW: {review.verdict}</span>
-        <span className="ml-auto font-normal text-[10px] opacity-65">{review.confidence}% confidence</span>
+        ${review.recommendation ? 'mb-2' : ''}`}>
+        <span>{bad ? '✗' : ok ? '✓' : '⚠'} Safety: {review.verdict}</span>
+        <span className="ml-auto text-xs opacity-65">{review.confidence}% confidence</span>
       </div>
       {review.recommendation && (
-        <p className="font-mono text-[10.5px] text-muted m-0 opacity-85">{review.recommendation}</p>
+        <p className="text-xs text-muted m-0">{review.recommendation}</p>
       )}
       {review.risks?.length > 0 && review.risks[0] !== 'none' && (
-        <ul className="mt-[6px] p-0 list-none space-y-0.5">
+        <ul className="mt-2 p-0 list-none space-y-1">
           {review.risks.map((r: string, i: number) => (
-            <li key={i} className="font-mono text-[10px] text-muted opacity-75">· {r}</li>
+            <li key={i} className="text-xs text-muted">· {r}</li>
           ))}
         </ul>
       )}
@@ -407,24 +349,20 @@ function SafetyBanner({ review }: { review: ReviewResult }) {
 // ── Summary Card ──────────────────────────────────────────────────────────────
 function SummaryCard({ summary, failed }: { summary: ExecutionSummary; failed: boolean }) {
   return (
-    <div className={`rounded-[11px] p-4 border slide-up-anim
-      ${failed ? 'border-red/28   bg-red/5'    : 'border-green/22 bg-green/8'}`}>
-      <div className="flex items-center gap-[10px] mb-3">
-        <span className="text-[18px]">{failed ? '❌' : '🎯'}</span>
-        <div className={`font-mono text-[11px] font-semibold tracking-[0.05em]
-          ${failed ? 'text-red' : 'text-green'}`}>
-          {failed ? '✗ EXECUTION FAILED' : '✓ ALL STEPS COMPLETED'}
-        </div>
+    <div className={`rounded-lg p-4 border slide-up-anim
+      ${failed ? 'border-red/20 bg-red/10' : 'border-green/20 bg-green/10'}`}>
+      <div className={`text-sm font-600 mb-4 ${failed ? 'text-red' : 'text-green'}`}>
+        {failed ? '✗ Execution failed' : '✓ All steps completed'}
       </div>
       <div className="grid grid-cols-3 gap-4">
         {[
-          { label: 'TOTAL STEPS', value: summary.total,                         color: 'text-ntext' },
-          { label: 'SUCCESSFUL',  value: summary.success,                        color: 'text-green' },
-          { label: 'DURATION',    value: `${(summary.duration/1000).toFixed(1)}s`, color: 'text-cyan' },
+          { label: 'Total steps', value: summary.total, color: 'text-ntext' },
+          { label: 'Successful', value: summary.success, color: 'text-green' },
+          { label: 'Duration', value: `${(summary.duration/1000).toFixed(1)}s`, color: 'text-cyan' },
         ].map(({ label, value, color }) => (
           <div key={label}>
-            <div className="font-mono text-[8.5px] text-dim tracking-[0.06em] mb-[3px]">{label}</div>
-            <div className={`font-display text-[24px] ${color}`}>{value}</div>
+            <div className="text-xs text-muted mb-1">{label}</div>
+            <div className={`text-xl font-600 ${color}`}>{value}</div>
           </div>
         ))}
       </div>
