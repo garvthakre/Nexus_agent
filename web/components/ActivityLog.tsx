@@ -29,24 +29,19 @@ export default function ActivityLog({ events }: { events: ActivityEvent[] }) {
   }, [events])
 
   return (
-    <div className="flex flex-col h-full bg-s1 border border-border rounded-[13px] overflow-hidden glow-border">
+    <div className="flex flex-col h-full bg-s1 border border-border rounded-lg overflow-hidden">
 
       {/* Title bar */}
-      <div className="flex items-center gap-2 px-[14px] py-[9px] border-b border-border bg-s2 flex-shrink-0">
-        <div className="flex gap-[5px]">
-          {['#ff5f57','#ffbd2e','#28c840'].map((c, i) => (
-            <div key={i} className="w-[9px] h-[9px] rounded-full opacity-75" style={{ background: c }} />
-          ))}
-        </div>
-        <span className="font-mono text-[10.5px] text-muted ml-1">nexus — activity log</span>
-        <span className="font-mono text-[9.5px] text-dim ml-auto">{events.length} events</span>
+      <div className="flex items-center gap-2 px-4 py-3 border-b border-border bg-s2 flex-shrink-0">
+        <span className="text-sm font-600 text-ntext">Activity</span>
+        <span className="ml-auto text-xs text-muted">{events.length} events</span>
       </div>
 
       {/* Events */}
-      <div ref={scrollRef} className="flex-1 overflow-y-auto py-[10px] font-mono">
+      <div ref={scrollRef} className="flex-1 overflow-y-auto py-2">
         {events.length === 0 ? (
-          <div className="text-center text-dim font-mono text-[11px] py-7">
-            awaiting activity...
+          <div className="text-center text-muted text-xs py-8">
+            Waiting for activity...
           </div>
         ) : events.map((ev, i) => {
           const s = TYPE_STYLES[ev.type] ?? FALLBACK
@@ -54,24 +49,16 @@ export default function ActivityLog({ events }: { events: ActivityEvent[] }) {
           return (
             <div
               key={i}
-              className={`flex gap-0 py-[1.5px] text-[10.5px] leading-[1.65] ${isLast ? 'slide-up-anim' : ''}`}
+              className={`flex gap-2 px-4 py-1.5 text-xs leading-relaxed border-b border-s2 last:border-0 ${isLast ? 'slide-up-anim' : ''}`}
             >
-              <span className="text-dim w-[66px] pl-3 pr-2 flex-shrink-0 select-none">{ev.time}</span>
-              <span className={`w-[40px] flex-shrink-0 font-semibold ${s.color}`}>{s.prefix}</span>
-              <span className={`flex-1 pr-3 break-all ${s.color} ${ev.type === 'connected' ? 'opacity-55' : 'opacity-90'}`}>
+              <span className="text-muted flex-shrink-0 w-12">{ev.time}</span>
+              <span className={`flex-shrink-0 font-500 w-12 ${s.color}`}>{s.prefix}</span>
+              <span className={`flex-1 break-words ${s.color}`}>
                 {ev.message}
               </span>
             </div>
           )
         })}
-
-        {/* Blinking cursor */}
-        <div className="flex items-center gap-[5px] pl-3 pt-1 font-mono text-[10.5px]">
-          <span className="text-dim">nexus@agent</span>
-          <span className="text-muted">~</span>
-          <span className="text-cyan">$</span>
-          <span className="inline-block w-[6.5px] h-3 bg-cyan ml-1 rounded-[1px] cursor-blink" />
-        </div>
       </div>
     </div>
   )
