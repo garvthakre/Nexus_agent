@@ -136,7 +136,7 @@ export function selectExamples(prompt: string, topN: number = 3): PlanExample[] 
   if (selected.length === 0) {
     return all.slice(0, Math.min(topN, all.length));
   }
-
+  console.log(`[Examples] Selected ${selected.length} examples for prompt: "${prompt}"`);
   return selected;
 }
 

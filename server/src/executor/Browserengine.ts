@@ -1,29 +1,4 @@
-/**
- * browserEngine.ts  — NEXUS Smart Browser Engine v6
- * ─────────────────────────────────────────────────────────────────────────────
- * Week 3 changes applied:
- *
- *   TIER 5 — Vision Fallback (Gemini Flash)
- *     NEW: When all previous tiers fail, take a screenshot of the current page
- *          and send it to Google Gemini 1.5 Flash (FREE — 1500 req/day).
- *          Gemini sees the rendered pixels, not the DOM — recovers cases where:
- *            - Element has no aria-label, placeholder, or accessible name
- *            - Page uses canvas rendering with no DOM structure
- *            - Shadow DOM prevents Playwright from seeing the element
- *            - Heavily obfuscated class names (randomised by bundler)
- *          Requires GEMINI_API_KEY in .env (free at aistudio.google.com)
- *          Falls back gracefully if key is missing — just skips to throw.
- *
- * Week 2 changes (already present):
- *   MEMORY TIER (Tier -1) — selectorMemory integration
- *   FIX 2A — Progressive waits between tier escalations
- *   FIX 2B — Groq selector validation in Tier 2/3
- *
- * Human Typing:
- *   All fill() calls replaced with humanType() for visible character-by-character
- *   typing with randomised per-keystroke delay (40–90ms).
- * ─────────────────────────────────────────────────────────────────────────────
- */
+
 
 import OpenAI from 'openai';
 import { recordSuccess, recordFailure, getBestSelector } from '../utils/selectorMemory';

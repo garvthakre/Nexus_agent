@@ -1,7 +1,7 @@
 import OpenAI from 'openai';
 import Anthropic from '@anthropic-ai/sdk';
 import { Plan, Capability } from '../types';
-import { selectExamples, formatExamplesForPrompt } from './promptExamples';
+import { selectExamples } from './promptExamples';
 import type {  PlanStep } from '../types/index';
 import { getMemoryForPrompt } from '../utils/memory';
 // ─── Static System Prompt ─────────────────────────────────────────────────────
@@ -492,21 +492,94 @@ safety_risk: low = reversible/read-only | medium = hard-to-undo writes | high = 
 
 // ─── Dynamic prompt builder ───────────────────────────────────────────────────
 
+type PromptSection = 'routing' | 'search' | 'excel' | 'linkedin' | 'whatsapp' | 'browser';
+
+const PROMPT_SECTION_TITLES: Record<PromptSection, string> = {
+  routing: 'APP ROUTING TABLE',
+  search: 'SEARCH ENGINE RULES',
+  excel: 'EXCEL / XLSX RULES',
+  linkedin: 'LINKEDIN JOBS EXCEL PATTERN',
+  whatsapp: 'WHATSAPP RULES',
+  browser: 'EXTRACT-THEN-NAVIGATE PATTERN',
+};
+
+const COMPACT_BROWSER_RULES = `BROWSER EXECUTION RULES
+Use browser_open for web tasks. Use browser_extract_results after search pages when results are requested.
+Use browser_read_page for article, job, or product details. Prefer direct URLs and avoid unnecessary fill steps.`;
+
+function detectPromptSections(userPrompt: string): PromptSection[] {
+  const text = userPrompt.toLowerCase();
+  const sections: PromptSection[] = ['routing'];
+
+  if (/(search|browse|website|web page|chrome|edge|firefox|youtube|spotify|gmail|reddit|github|news)/.test(text)) {
+    sections.push('search', 'browser');
+  }
+  if (text.includes('excel') || text.includes('.xlsx') || text.includes('.xls')) sections.push('excel');
+  if (text.includes('linkedin') || text.includes('job search') || text.includes('jobs')) sections.push('linkedin');
+  if (text.includes('whatsapp')) sections.push('whatsapp');
+
+  return [...new Set(sections)];
+}
+
+function getPromptSection(section: PromptSection): string {
+  if (section === 'browser') return COMPACT_BROWSER_RULES;
+
+  const title = PROMPT_SECTION_TITLES[section];
+  const start = STATIC_SYSTEM_PROMPT.indexOf(title);
+  if (start < 0) return '';
+
+  const nextStarts = [...Object.values(PROMPT_SECTION_TITLES), 'OUTPUT SCHEMA']
+    .map(nextTitle => STATIC_SYSTEM_PROMPT.indexOf(nextTitle, start + title.length))
+    .filter(index => index >= 0);
+  const end = nextStarts.length > 0 ? Math.min(...nextStarts) : STATIC_SYSTEM_PROMPT.length;
+  return STATIC_SYSTEM_PROMPT.slice(start, end).trim();
+}
+
+function formatCompactExample(userPrompt: string): string {
+  const example = selectExamples(userPrompt, 1)[0];
+  if (!example) return '';
+
+  const compactSteps = example.steps.map((step, index) => ({
+    step_number: index + 1,
+    capability: step.capability,
+    parameters: Object.fromEntries(
+      Object.entries(step.parameters).map(([key, value]) => [
+        key,
+        typeof value === 'string' && value.length > 240 ? `${value.slice(0, 240)}...` : value,
+      ])
+    ),
+    safety_risk: step.safety_risk,
+    description: step.description ?? step.capability.replace(/_/g, ' '),
+  }));
+
+  return `RELEVANT COMPACT EXAMPLE\nREQUEST: "${example.request}"\nOUTPUT:\n${JSON.stringify({
+    intent: example.category,
+    confidence: 95,
+    requires_confirmation: false,
+    summary: `Execute: ${example.request}`,
+    steps: compactSteps,
+  }, null, 2)}`;
+}
+
 async function buildSystemPrompt(userPrompt: string): Promise<string> {
-  const examples = selectExamples(userPrompt, 3);
-  const examplesBlock = formatExamplesForPrompt(examples);
-  const memory = await getMemoryForPrompt();
+  const outputSchemaStart = STATIC_SYSTEM_PROMPT.indexOf('OUTPUT SCHEMA');
+  const corePrompt = outputSchemaStart >= 0
+    ? STATIC_SYSTEM_PROMPT.slice(0, STATIC_SYSTEM_PROMPT.indexOf('APP ROUTING TABLE')).trim()
+    : STATIC_SYSTEM_PROMPT;
+  const outputSchema = outputSchemaStart >= 0 ? STATIC_SYSTEM_PROMPT.slice(outputSchemaStart).trim() : '';
+  const sections = detectPromptSections(userPrompt).map(getPromptSection).filter(Boolean);
+  const examplesBlock = formatCompactExample(userPrompt);
+  const memory = (await getMemoryForPrompt()).slice(0, 1000);
+  const prompt = [corePrompt, ...sections, outputSchema, memory, examplesBlock].filter(Boolean).join('\n\n');
 
-  const parts = [STATIC_SYSTEM_PROMPT];
-  if (memory) parts.push(memory);
-  if (examplesBlock) parts.push(examplesBlock);
-
-  return parts.join('\n\n');
+  console.log(`[Planner] Prompt size: ${prompt.length} characters; sections: ${detectPromptSections(userPrompt).join(', ')}`);
+  return prompt;
 }
 
 // ─── Provider Implementations ─────────────────────────────────────────────────
 
 async function planWithGroq(userPrompt: string): Promise<string> {
+  console.log(`[Planner] Using GROQ model: ${process.env.GROQ_MODEL ?? 'llama-3.3-70b-versatile'}`);
   const client = new OpenAI({
     apiKey: process.env.GROQ_API_KEY,
     baseURL: 'https://api.groq.com/openai/v1',

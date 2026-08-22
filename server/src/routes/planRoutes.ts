@@ -22,9 +22,27 @@ planRoutes.post('/api/plan', async (req, res) => {
     broadcast({ type: 'plan_ready', sessionId, plan })
     res.json({ sessionId, plan })
   } catch (err: unknown) {
-    const e = err as Error
-    broadcast({ type: 'error', message: e.message })
-    res.status(500).json({ error: e.message })
+    const e = err as {
+      status?: number
+      message?: string
+      code?: string
+      request_id?: string
+      headers?: { ['x-groq-region']?: string }
+      error?: { code?: string; message?: string }
+    }
+    const message = e.error?.message ?? e.message ?? 'Planning failed'
+    const code = e.error?.code ?? e.code
+
+    console.error('[API /api/plan] Planning failed', {
+      status: e.status,
+      code,
+      message,
+      requestId: e.request_id,
+      region: e.headers?.['x-groq-region'],
+    })
+
+    broadcast({ type: 'error', message })
+    res.status(500).json({ error: message })
   }
 })
 

@@ -1,6 +1,4 @@
-// ═══════════════════════════════════════════════════════════════════════════
-// NEXUS — Smart Auto-Fix System
-// ═══════════════════════════════════════════════════════════════════════════
+ 
 //
 // KEY INSIGHT: Retrying the same file with the same error = infinite loop.
 // The fix must PATCH THE SOURCE FILE before retrying, not just install deps.
