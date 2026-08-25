@@ -232,3 +232,14 @@ export interface ExecutionLogEntry {
     pageUrl?:     string;
   }>;
 }
+
+export interface CommerceProduct {
+  id: string; name: string; description: string; price: number; currency: 'INR'; category: string; upsellCandidates: string[]
+}
+export interface CommerceMessage { role: 'buyer' | 'agent'; content: string; timestamp: string }
+export interface CommerceSession {
+  sessionId: string; buyerType: 'human' | 'simulated_agent'; messages: CommerceMessage[]; cartItems: Array<{ productId: string; quantity: number }>; status: string; createdAt: string
+}
+export interface CommerceTransaction {
+  sessionId: string; razorpayOrderId: string; amount: number; status: string; gatingDecision: string; reasoning: string; createdAt: string; idempotencyKey: string
+}
