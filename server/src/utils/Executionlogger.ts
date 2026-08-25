@@ -118,7 +118,9 @@ export async function getExecutionLogs(): Promise<ExecutionLog[]> {
       .trim()
       .split('\n')
       .filter(Boolean)
-      .map(line => JSON.parse(line) as ExecutionLog);
+      .map(line => JSON.parse(line) as ExecutionLog & { kind?: string })
+      .filter(entry => entry.kind !== 'commerce')
+      .map(entry => entry as ExecutionLog);
   } catch {
     return [];
   }
@@ -167,4 +169,26 @@ export async function getFailureStats(): Promise<{
     avgSuccess: Math.round(avgSuccess * 100) / 100,
     recentTrend,
   };
+}
+
+export interface CommerceEventLog {
+  timestamp: string;
+  event: string;
+  sessionId: string;
+  transactionId?: string;
+  amount?: number;
+  status?: string;
+  gatingDecision?: string;
+  reasoning?: string;
+  message?: string;
+}
+
+export async function logCommerceEvent(entry: CommerceEventLog): Promise<void> {
+  try {
+    await ensureLogDir();
+    await trimToMaxEntries();
+    await fs.appendFile(LOG_FILE, JSON.stringify({ ...entry, kind: 'commerce' }) + '\n', 'utf-8');
+  } catch (err) {
+    console.error('[Logger] FAILED to write commerce event:', err);
+  }
 }
