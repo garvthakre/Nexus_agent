@@ -17,6 +17,13 @@ It can browse the web, control desktop apps, manage files, send WhatsApp message
 - **Wallpaper** — set desktop wallpaper from a search query or local file
 - **Excel/Word** — generate spreadsheets and documents from live data
 - **Research** — search a topic, read multiple articles, summarize into a report
+- **Agentic commerce** — browse a seeded developer-workspace catalog, chat with a sales agent, and create Razorpay test orders behind a safety gate
+
+### Commerce demo
+
+Copy `server/.env.example` to `server/.env` and add Razorpay test credentials (`RAZORPAY_KEY_ID`, `RAZORPAY_KEY_SECRET`, and `RAZORPAY_WEBHOOK_SECRET`). The commerce panel appears below the automation workspace. Start a session, add products through the catalog or chat, and create a test order. Enable **Force test failure** to demonstrate recovery messaging. Orders above `COMMERCE_AUTO_APPROVAL_LIMIT` (default INR 5,000) are held for approval.
+
+The current server-side Orders API creates the Razorpay order. Payment authorization remains a Razorpay Checkout/test-environment step; webhook events update captured or failed state. Use the official [Razorpay test card and UPI details](https://razorpay.com/docs/payments/payments/test-card-upi-details/) for `success@razorpay` and `failure@razorpay` flows.
 
 Some example prompts that work out of the box:
 
