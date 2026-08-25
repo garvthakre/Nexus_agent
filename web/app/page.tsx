@@ -6,6 +6,7 @@ import PlanDisplay from '@/components/PlanDisplay'
 import ActivityLog from '@/components/ActivityLog'
 import AgentStatusBar from '@/components/AgentStatusBar'
 import StatCard from '@/components/StatCard'
+import CommercePanel from '@/components/CommercePanel'
 
 const WS_URL = process.env.NEXT_PUBLIC_WS_URL ?? 'ws://localhost:3001'
 
@@ -106,6 +107,7 @@ export default function HomePage() {
             </div>
           </div>
         </div>
+        <CommercePanel />
       </main>
 
 
