@@ -24,3 +24,8 @@ export function validateEnv(): void {
 
   console.log(`✓ Env valid — provider: ${provider}`);
 }
+
+export function getCommerceAutoApprovalLimit(): number {
+  const configured = Number(process.env.COMMERCE_AUTO_APPROVAL_LIMIT ?? 5000);
+  return Number.isFinite(configured) && configured >= 0 ? configured : 5000;
+}
