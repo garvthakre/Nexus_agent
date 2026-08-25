@@ -490,6 +490,11 @@ OUTPUT SCHEMA
 
 safety_risk: low = reversible/read-only | medium = hard-to-undo writes | high = system/install/delete`;
 
+// ─── Token Budget ─────────────────────────────────────────────────────────────
+// ~12,000 chars ≈ 3,000 tokens — leaves room for user prompt + response within Groq's limits
+const SYSTEM_PROMPT_CHAR_BUDGET = 12_000;
+const MAX_USER_PROMPT_CHARS = 4_000;
+
 // ─── Dynamic prompt builder ───────────────────────────────────────────────────
 
 type PromptSection = 'routing' | 'search' | 'excel' | 'linkedin' | 'whatsapp' | 'browser';
@@ -567,12 +572,50 @@ async function buildSystemPrompt(userPrompt: string): Promise<string> {
     ? STATIC_SYSTEM_PROMPT.slice(0, STATIC_SYSTEM_PROMPT.indexOf('APP ROUTING TABLE')).trim()
     : STATIC_SYSTEM_PROMPT;
   const outputSchema = outputSchemaStart >= 0 ? STATIC_SYSTEM_PROMPT.slice(outputSchemaStart).trim() : '';
-  const sections = detectPromptSections(userPrompt).map(getPromptSection).filter(Boolean);
-  const examplesBlock = formatCompactExample(userPrompt);
-  const memory = (await getMemoryForPrompt()).slice(0, 1000);
-  const prompt = [corePrompt, ...sections, outputSchema, memory, examplesBlock].filter(Boolean).join('\n\n');
 
-  console.log(`[Planner] Prompt size: ${prompt.length} characters; sections: ${detectPromptSections(userPrompt).join(', ')}`);
+  const detectedSections = detectPromptSections(userPrompt);
+  let sections = detectedSections.map(getPromptSection).filter(Boolean);
+  let examplesBlock = formatCompactExample(userPrompt);
+  let memory = (await getMemoryForPrompt()).slice(0, 1000);
+
+  // Assemble and enforce hard character budget
+  let prompt = [corePrompt, ...sections, outputSchema, memory, examplesBlock].filter(Boolean).join('\n\n');
+
+  // Progressive stripping if over budget: examples -> memory -> sections (least relevant first)
+  if (prompt.length > SYSTEM_PROMPT_CHAR_BUDGET) {
+    console.warn(`[Planner] Prompt over budget (${prompt.length} chars). Stripping examples...`);
+    examplesBlock = '';
+    prompt = [corePrompt, ...sections, outputSchema, memory].filter(Boolean).join('\n\n');
+  }
+
+  if (prompt.length > SYSTEM_PROMPT_CHAR_BUDGET) {
+    console.warn(`[Planner] Still over budget (${prompt.length} chars). Stripping memory...`);
+    memory = '';
+    prompt = [corePrompt, ...sections, outputSchema].filter(Boolean).join('\n\n');
+  }
+
+  // Strip non-routing sections in order of least importance
+  const STRIP_ORDER: PromptSection[] = ['linkedin', 'whatsapp', 'excel', 'browser', 'search'];
+  for (const strip of STRIP_ORDER) {
+    if (prompt.length <= SYSTEM_PROMPT_CHAR_BUDGET) break;
+    if (detectedSections.includes(strip)) {
+      console.warn(`[Planner] Still over budget (${prompt.length} chars). Stripping "${strip}" section...`);
+      const remainingSections = detectedSections
+        .filter(s => s !== strip)
+        .map(getPromptSection)
+        .filter(Boolean);
+      sections = remainingSections;
+      prompt = [corePrompt, ...sections, outputSchema].filter(Boolean).join('\n\n');
+    }
+  }
+
+  // Last resort: hard truncate to budget
+  if (prompt.length > SYSTEM_PROMPT_CHAR_BUDGET) {
+    console.warn(`[Planner] Force-truncating prompt from ${prompt.length} to ${SYSTEM_PROMPT_CHAR_BUDGET} chars`);
+    prompt = prompt.slice(0, SYSTEM_PROMPT_CHAR_BUDGET);
+  }
+
+  console.log(`[Planner] Prompt size: ${prompt.length} chars; sections: ${detectedSections.join(', ')}`);
   return prompt;
 }
 
@@ -731,6 +774,12 @@ function validatePlan(raw: string): Plan {
 function classifyProviderError(provider: string, err: unknown): Error {
   const e = err as { status?: number; message?: string };
   const msg = (e.message ?? '').toLowerCase();
+  if (e.status === 413 || msg.includes('entity too large') || msg.includes('payload too large') || msg.includes('request too large')) {
+    return Object.assign(
+      new Error(`[${provider.toUpperCase()}] Request too large. Try a shorter prompt or switch to a model with a larger context window.`),
+      { is413: true },
+    );
+  }
   if (e.status === 429 || msg.includes('quota') || msg.includes('credit') || msg.includes('rate limit')) {
     return new Error(`[${provider.toUpperCase()}] Rate limit or quota exceeded.`);
   }
@@ -743,21 +792,117 @@ function classifyProviderError(provider: string, err: unknown): Error {
   return err as Error;
 }
 
+// ─── Helpers for 413 retry ────────────────────────────────────────────────────
+
+function is413(err: unknown): boolean {
+  const e = err as { status?: number; is413?: boolean; message?: string };
+  if (e.is413) return true;
+  if (e.status === 413) return true;
+  const msg = (e.message ?? '').toLowerCase();
+  return msg.includes('entity too large') || msg.includes('payload too large') || msg.includes('request too large');
+}
+
+function buildMinimalSystemPrompt(): string {
+  const outputSchemaStart = STATIC_SYSTEM_PROMPT.indexOf('OUTPUT SCHEMA');
+  const corePrompt = STATIC_SYSTEM_PROMPT.slice(
+    0,
+    STATIC_SYSTEM_PROMPT.indexOf('APP ROUTING TABLE'),
+  ).trim();
+  const outputSchema = outputSchemaStart >= 0 ? STATIC_SYSTEM_PROMPT.slice(outputSchemaStart).trim() : '';
+  return [corePrompt, outputSchema].filter(Boolean).join('\n\n');
+}
+
+async function callProvider(provider: string, userPrompt: string, systemPrompt: string): Promise<string> {
+  if (provider === 'groq') {
+    const client = new OpenAI({
+      apiKey: process.env.GROQ_API_KEY,
+      baseURL: 'https://api.groq.com/openai/v1',
+    });
+    const response = await client.chat.completions.create({
+      model: process.env.GROQ_MODEL ?? 'llama-3.3-70b-versatile',
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user',   content: userPrompt },
+      ],
+      temperature: 0.1,
+      max_tokens: 4000,
+      response_format: { type: 'json_object' },
+    });
+    const choice = response.choices[0];
+    if (choice.finish_reason === 'length') {
+      throw new Error('[GROQ] Response was truncated (hit max_tokens limit). The plan JSON is incomplete — increase max_tokens or shorten the prompt.');
+    }
+    if (response.usage) {
+      console.log(`[Planner] Groq tokens — prompt: ${response.usage.prompt_tokens}, completion: ${response.usage.completion_tokens}`);
+    }
+    return choice.message.content ?? '';
+  } else if (provider === 'anthropic') {
+    const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+    const response = await client.messages.create({
+      model: process.env.ANTHROPIC_MODEL ?? 'claude-opus-4-6',
+      max_tokens: 4000,
+      system: systemPrompt,
+      messages: [{ role: 'user', content: userPrompt }],
+    });
+    const block = response.content[0];
+    if (block.type !== 'text') throw new Error('Unexpected response type from Anthropic');
+    return block.text;
+  } else if (provider === 'openai') {
+    const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+    const response = await client.chat.completions.create({
+      model: process.env.OPENAI_MODEL ?? 'gpt-4o',
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user',   content: userPrompt },
+      ],
+      response_format: { type: 'json_object' },
+      temperature: 0.1,
+      max_tokens: 4000,
+    });
+    return response.choices[0].message.content ?? '';
+  } else {
+    throw new Error(`Unknown AI_PROVIDER "${provider}". Must be groq, anthropic, or openai.`);
+  }
+}
+
 // ─── Main Export ──────────────────────────────────────────────────────────────
 
 export async function planTask(userPrompt: string): Promise<Plan> {
   const provider = (process.env.AI_PROVIDER ?? 'groq').toLowerCase();
-  console.log(`[Planner] "${userPrompt.substring(0, 80)}" — provider: ${provider}`);
+
+  // Truncate user prompt if too long (especially replan prompts)
+  let truncatedPrompt = userPrompt;
+  if (truncatedPrompt.length > MAX_USER_PROMPT_CHARS) {
+    console.warn(`[Planner] User prompt too long (${truncatedPrompt.length} chars). Truncating to ${MAX_USER_PROMPT_CHARS}...`);
+    truncatedPrompt = truncatedPrompt.slice(0, MAX_USER_PROMPT_CHARS) + '\n\n[...truncated — focus on the core request above]';
+  }
+
+  console.log(`[Planner] "${truncatedPrompt.substring(0, 80)}" — provider: ${provider}`);
 
   let raw: string;
 
   try {
-    if (provider === 'groq')           raw = await planWithGroq(userPrompt);
-    else if (provider === 'anthropic') raw = await planWithAnthropic(userPrompt);
-    else if (provider === 'openai')    raw = await planWithOpenAI(userPrompt);
-    else throw new Error(`Unknown AI_PROVIDER "${provider}". Must be groq, anthropic, or openai.`);
+    const systemPrompt = await buildSystemPrompt(truncatedPrompt);
+    console.log(`[Planner] Total request size: system=${systemPrompt.length} + user=${truncatedPrompt.length} = ${systemPrompt.length + truncatedPrompt.length} chars`);
+    raw = await callProvider(provider, truncatedPrompt, systemPrompt);
   } catch (err) {
-    throw classifyProviderError(provider, err);
+    // On 413, retry with a minimal system prompt
+    if (is413(err)) {
+      console.warn(`[Planner] 413 error — retrying with minimal system prompt...`);
+      try {
+        const minimalPrompt = buildMinimalSystemPrompt();
+        // Also further truncate the user prompt for the retry
+        const shortUserPrompt = truncatedPrompt.length > 2000
+          ? truncatedPrompt.slice(0, 2000) + '\n\n[...truncated]'
+          : truncatedPrompt;
+        console.log(`[Planner] Retry sizes: system=${minimalPrompt.length} + user=${shortUserPrompt.length} chars`);
+        raw = await callProvider(provider, shortUserPrompt, minimalPrompt);
+      } catch (retryErr) {
+        throw classifyProviderError(provider, retryErr);
+      }
+    } else {
+      throw classifyProviderError(provider, err);
+    }
   }
 
   try {
@@ -782,35 +927,43 @@ export async function replanFromStep(
   blockedUrls:      string[] = [],
 ): Promise<Plan | null> {
 
-  // ── Build a blocked-URL warning block for the prompt ──────────────────────
-  const blockedBlock = blockedUrls.length > 0
+  // ── Build a compact blocked-URL warning block for the prompt ─────────────
+  const recentBlocked = blockedUrls.slice(-5);
+  const blockedBlock = recentBlocked.length > 0
     ? [
         '',
         'BOT-BLOCKED URLS — DO NOT USE ANY OF THESE IN YOUR NEW PLAN:',
-        ...blockedUrls.map(u => `  - ${u}`),
+        ...recentBlocked.map(u => `  - ${u.slice(0, 200)}`),
         'Skip these entirely. Use only the data already collected or pick a different result index.',
         '',
       ].join('\n')
     : '';
 
+  // Limit completed steps to last 3 to keep prompt token size small
+  const recentCompleted = completedSteps.slice(-3);
+  const completedSummary = recentCompleted.map((s, i) => `  ${completedSteps.length - recentCompleted.length + i + 1}. [${s.capability}] ${s.description} — DONE`);
+  if (completedSteps.length > 3) {
+    completedSummary.unshift(`  [... ${completedSteps.length - 3} earlier completed step(s) omitted]`);
+  }
+
   const prompt = [
-    `ORIGINAL GOAL: ${originalSummary}`,
+    `ORIGINAL GOAL: ${originalSummary.slice(0, 300)}`,
     '',
     `COMPLETED SO FAR (${completedSteps.length} step${completedSteps.length !== 1 ? 's' : ''}):`,
-    ...completedSteps.map((s, i) => `  ${i + 1}. [${s.capability}] ${s.description} — DONE`),
+    ...completedSummary,
     '',
-    `FAILED STEP: "${failedStep.description}"`,
+    `FAILED STEP: "${failedStep.description.slice(0, 200)}"`,
     `CAPABILITY:  ${failedStep.capability}`,
-    `ERROR:       ${errorMessage}`,
+    `ERROR:       ${errorMessage.slice(0, 500)}`,
     '',
     `CURRENT BROWSER STATE:`,
-    `  Page title: "${currentPageTitle}"`,
-    `  Page URL:   ${currentPageUrl}`,
+    `  Page title: "${currentPageTitle.slice(0, 200)}"`,
+    `  Page URL:   ${currentPageUrl.slice(0, 200)}`,
     blockedBlock,
-    `REMAINING GOAL: ${remainingGoal}`,
+    `REMAINING GOAL: ${remainingGoal.slice(0, 400)}`,
     '',
     `ERROR ANALYSIS:`,
-    ...analyzeError(errorMessage, currentPageUrl, blockedUrls),
+    ...analyzeError(errorMessage.slice(0, 500), currentPageUrl, recentBlocked),
     '',
     `Generate a NEW plan starting from the CURRENT PAGE (above) to achieve the remaining goal.`,
     `- Number your steps starting from 1`,
