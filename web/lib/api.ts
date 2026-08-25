@@ -1,4 +1,4 @@
-import { Plan, ReviewResult, ExecutionState } from '@/types'
+import { Plan, ReviewResult, ExecutionState, CommerceProduct, CommerceSession, CommerceTransaction } from '@/types'
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001'
 
@@ -62,4 +62,18 @@ export const api = {
 
   getSession: (sessionId: string) =>
     fetchAPI<ExecutionState>(`/api/session/${sessionId}`),
+
+  commerceCatalog: () => fetchAPI<{ products: CommerceProduct[] }>('/commerce/catalog'),
+  commerceStart: (buyerType: 'human' | 'simulated_agent' = 'human') =>
+    fetchAPI<CommerceSession>('/commerce/session/start', { method: 'POST', body: JSON.stringify({ buyerType }) }),
+  commerceMessage: (sessionId: string, message: string) =>
+    fetchAPI<{ result: { reply: string; action: string }; session: CommerceSession | undefined }>(`/commerce/session/${sessionId}/message`, { method: 'POST', body: JSON.stringify({ message }) }),
+  commerceCheckout: (sessionId: string, key: string, demoOutcome?: 'success' | 'failure') =>
+    fetchAPI<{ transaction: CommerceTransaction; decision: string; amount: number }>(`/commerce/session/${sessionId}/checkout`, { method: 'POST', headers: { 'Idempotency-Key': key }, body: JSON.stringify({ demoOutcome }) }),
+  commerceApprove: (sessionId: string, key: string) =>
+    fetchAPI<{ transaction: CommerceTransaction }>(`/commerce/session/${sessionId}/approve`, { method: 'POST', headers: { 'Idempotency-Key': key } }),
+  commerceReject: (sessionId: string) =>
+    fetchAPI<{ transaction: CommerceTransaction }>(`/commerce/session/${sessionId}/reject`, { method: 'POST' }),
+  commerceMetrics: () => fetchAPI<{ sessions: number; checkoutInitiated: number; completionRate: number; captured: number; failed: number; humanGated: number; autoApproved: number }>('/commerce/metrics'),
+  commerceSimulate: (persona: string, goal: string) => fetchAPI<unknown>('/commerce/simulate', { method: 'POST', body: JSON.stringify({ persona, goal }) }),
 }
