@@ -9,6 +9,7 @@ import { healthRoutes } from './routes/healthRoutes';
 import { planRoutes } from './routes/planRoutes';
 import { executionRoutes } from './routes/executionRoutes';
 import { sessionRoutes } from './routes/sessionRoutes';
+import { commerceRoutes } from './routes/commerceRoutes';
 
 validateEnv();
 
@@ -25,6 +26,7 @@ app.use(healthRoutes);
 app.use(planRoutes);
 app.use(executionRoutes);
 app.use(sessionRoutes);
+app.use(commerceRoutes);
 
 const PORT = parseInt(process.env.PORT ?? '3001', 10);
 server.listen(PORT, () => {
