@@ -212,6 +212,37 @@ export interface ReviewRequest {
   plan: Plan;
 }
 
+export type CommerceAction = 'add_to_cart' | 'remove_from_cart' | 'initiate_checkout' | 'none';
+export interface CommerceProduct {
+  id: string;
+  name: string;
+  description: string;
+  price: number;
+  currency: 'INR';
+  category: string;
+  upsellCandidates: string[];
+}
+export interface CommerceCartItem { productId: string; quantity: number; }
+export interface CommerceMessage { role: 'buyer' | 'agent'; content: string; timestamp: string; }
+export interface CommerceSession {
+  sessionId: string;
+  buyerType: 'human' | 'simulated_agent';
+  messages: CommerceMessage[];
+  cartItems: CommerceCartItem[];
+  status: 'browsing' | 'checkout_initiated' | 'payment_pending' | 'completed' | 'failed';
+  createdAt: string;
+}
+export interface CommerceTransaction {
+  sessionId: string;
+  razorpayOrderId: string;
+  amount: number;
+  status: 'created' | 'authorized' | 'captured' | 'failed';
+  gatingDecision: string;
+  reasoning: string;
+  createdAt: string;
+  idempotencyKey: string;
+}
+
 
 // ─── Execution Log Entry ──────────────────────────────────────────────────────
 
