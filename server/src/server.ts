@@ -17,7 +17,7 @@ const server = http.createServer(app);
 const wss = new WebSocketServer({ server });
 
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: '10mb' }));
 
 setupWebSocket(wss);
 
