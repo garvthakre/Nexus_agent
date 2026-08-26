@@ -3,6 +3,7 @@
 import OpenAI from 'openai';
 import { recordSuccess, recordFailure, getBestSelector } from '../utils/selectorMemory';
 import { humanType, humanDelay, sleep } from '../utils/humanTyping';
+import { getProviderKey } from '../ai/providerCredentials';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -858,10 +859,11 @@ async function tier5VisionGemini(
   hint: string,
   action: ElementAction,
   value?: string,
+  userId?: string,
 ): Promise<ActionResult | null> {
   console.log('[Tier 5] Vision fallback (Gemini Flash) starting...');
 
-  const geminiKey = process.env.GEMINI_API_KEY;
+  const geminiKey = await getProviderKey('gemini', userId);
   if (!geminiKey || geminiKey === 'your_gemini_api_key_here') {
     console.log('[Tier 5] GEMINI_API_KEY not set — skipping vision fallback.');
     return null;
@@ -1100,6 +1102,7 @@ export async function smartFindAndAct(
   hint: string,
   action: ElementAction,
   value?: string,
+  userId?: string,
 ): Promise<ActionResult> {
   console.log(`\n[SmartBrowser] ${action.toUpperCase()} — hint: "${hint.slice(0, 60)}" ${value ? `value: "${value}"` : ''}`);
 
@@ -1195,7 +1198,7 @@ export async function smartFindAndAct(
 
   // ── Tier 5: Vision fallback (Gemini Flash) — WEEK 3 ──────────────────────
   console.log('[SmartBrowser] Tier 4 failed — escalating to Tier 5 (Vision/Gemini)');
-  const t5 = await tier5VisionGemini(page, hint, action, value);
+  const t5 = await tier5VisionGemini(page, hint, action, value, userId);
   if (t5) { await recordSuccess(pageUrl, hint, t5.strategy, t5.tier); return t5; }
 
   const currentUrl = page.url();
