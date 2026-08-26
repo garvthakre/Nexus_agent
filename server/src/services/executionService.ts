@@ -3,14 +3,16 @@ import { replanFromStep } from '../ai/planner';
 import { executeStep, getLivePage } from '../executor/stepExecutor';
 import { logExecution } from '../utils/Executionlogger';
 import { appendMemory } from '../utils/memory';
-import { broadcast } from './websocketService';
+import { broadcast as broadcastToUser } from './websocketService';
 import { sleep } from './workarounds';
 import {
   Session,
   StepExecutionResult,
   PlanStep,
+  WsMessage,
 } from '../types';
 import { markUrlBlocked, getBlockedUrls, isUrlBlocked } from '../executor/blockedUrlTracker';
+import { logStep, saveSession } from './sessionService';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -28,6 +30,7 @@ const MAX_RETRIES = 2;
  */
 
 export async function executeAllSteps(sessionId: string, session: Session): Promise<void> {
+  const broadcast = (message: WsMessage): void => broadcastToUser(message, session.userId);
   const { plan } = session;
   const results: StepExecutionResult[] = [];
   let totalFailed = 0;
@@ -38,6 +41,7 @@ export async function executeAllSteps(sessionId: string, session: Session): Prom
 
     const step = plan.steps[i];
     session.currentStep = i + 1;
+    await saveSession(session);
 
     broadcast({ type: 'step_start', sessionId, stepNumber: step.step_number, step });
 
@@ -118,10 +122,11 @@ export async function executeAllSteps(sessionId: string, session: Session): Prom
       const stepStartTime = Date.now();
 
       try {
-        const result   = await executeStep(step);
+        const result   = await executeStep(step, session.userId);
         const duration = Date.now() - stepStartTime;
 
         results.push({ stepNumber: step.step_number, success: true, result, duration });
+        await logStep(sessionId, step.step_number, { status: 'completed', result, durationMs: duration });
         broadcast({ type: 'step_complete', sessionId, stepNumber: step.step_number, result, duration });
         succeeded = true;
         break;
@@ -155,6 +160,7 @@ export async function executeAllSteps(sessionId: string, session: Session): Prom
     if (!succeeded) {
       broadcast({ type: 'step_error', sessionId, stepNumber: step.step_number, error: lastError });
       results.push({ stepNumber: step.step_number, success: false, error: lastError });
+      await logStep(sessionId, step.step_number, { status: 'failed', error: lastError });
       totalFailed++;
 
       // ── Mid-execution replanning ──────────────────────────────────────
@@ -203,6 +209,7 @@ export async function executeAllSteps(sessionId: string, session: Session): Prom
               pageTitle,
               remainingGoal,
               currentBlockedUrls,  // ← NEW: pass blocked URLs
+              session.userId,
             );
 
             if (newPlan && newPlan.steps.length > 0) {
@@ -245,6 +252,7 @@ export async function executeAllSteps(sessionId: string, session: Session): Prom
     const totalDuration = Date.now() - startTime;
     const overallSuccess = totalFailed < results.length / 2;
     session.status = totalFailed === results.length ? 'failed' : 'completed';
+    await saveSession(session);
 
     broadcast({
       type: 'execution_complete',
@@ -283,5 +291,8 @@ export async function executeAllSteps(sessionId: string, session: Session): Prom
       durationMs: totalDuration,
     });
     await appendMemory(plan.intent, plan.summary, overallSuccess, plan.steps.length);
+  } else {
+    session.status = 'stopped';
+    await saveSession(session);
   }
 }
