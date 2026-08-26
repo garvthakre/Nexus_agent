@@ -2,6 +2,12 @@
 export function validateEnv(): void {
   const provider = (process.env.AI_PROVIDER ?? 'groq').toLowerCase();
 
+  const requiredInfrastructure = ['DATABASE_URL', 'JWT_SECRET', 'ENCRYPTION_KEY'];
+  const missingInfrastructure = requiredInfrastructure.filter((key) => !process.env[key]);
+  if (process.env.ENCRYPTION_KEY && process.env.ENCRYPTION_KEY.length < 16) {
+    missingInfrastructure.push('ENCRYPTION_KEY (must be at least 16 characters)');
+  }
+
   const required: Record<string, string[]> = {
     groq:      ['GROQ_API_KEY'],
     anthropic: ['ANTHROPIC_API_KEY'],
@@ -12,8 +18,9 @@ export function validateEnv(): void {
     (k) => !process.env[k] || (process.env[k] ?? '').includes('your_')
   );
 
-  if (missing.length > 0) {
+  if (missingInfrastructure.length > 0 || missing.length > 0) {
     console.error('\n Missing required environment variables:');
+    missingInfrastructure.forEach((k) => console.error(`   ${k}`));
     missing.forEach((k) => console.error(`   ${k}`));
     console.error('\nSteps to fix:');
     console.error('  1. Copy server/.env.example to server/.env');
