@@ -3,8 +3,9 @@ import { Plan, ReviewResult, ExecutionState } from '@/types'
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001'
 
 async function fetchAPI<T>(path: string, options: RequestInit = {}): Promise<T> {
+  const token = typeof window !== 'undefined' ? localStorage.getItem('nexus_token') : null
   const res = await fetch(`${API_URL}${path}`, {
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
     ...options,
   })
   const data = await res.json() as T & { error?: string }
@@ -33,6 +34,10 @@ export interface HealthResponse {
 }
 
 export const api = {
+  register: (email: string, password: string) => fetchAPI<{ token: string }>('/api/auth/register', { method: 'POST', body: JSON.stringify({ email, password }) }),
+  login: (email: string, password: string) => fetchAPI<{ token: string }>('/api/auth/login', { method: 'POST', body: JSON.stringify({ email, password }) }),
+  listKeys: () => fetchAPI<Array<{ provider: string; updatedAt: string }>>('/api/keys'),
+  saveKey: (provider: string, key: string) => fetchAPI('/api/keys', { method: 'POST', body: JSON.stringify({ provider, key }) }),
   health: () =>
     fetchAPI<HealthResponse>('/api/health'),
 
