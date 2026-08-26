@@ -12,6 +12,7 @@ import { openApplicationWindows } from './windowsAppLauncher';
 import { smartFindAndAct } from './Browserengine';
 import { sendWhatsAppMessage, getWhatsAppChats , makeWhatsAppCall } from './whatsappClient';
 import { humanDelay, humanTypeIntoPage, buildVisibleCmdScript } from '../utils/humanTyping';
+import { getProviderKey } from '../ai/providerCredentials';
 
 const execAsync = promisify(exec);
 
@@ -260,7 +261,7 @@ async function handleBotDetection(page: import('playwright').Page): Promise<void
 
 // ─── Main Dispatcher ──────────────────────────────────────────────────────────
 
-export async function executeStep(step: PlanStep): Promise<StepResult> {
+export async function executeStep(step: PlanStep, userId?: string): Promise<StepResult> {
   const { capability, parameters } = step;
   console.log(`[Executor] ${capability}`, parameters);
 
@@ -269,13 +270,13 @@ export async function executeStep(step: PlanStep): Promise<StepResult> {
     case 'set_wallpaper':               return setWallpaper(parameters.query);
     case 'run_shell_command':           return runShellCommand(parameters.command);
     case 'browser_open':                return browserOpen(parameters.url);
-    case 'browser_fill':                return browserFill(parameters.selector, parameters.value);
-    case 'browser_click':               return browserClick(parameters.selector);
+    case 'browser_fill':                return browserFill(parameters.selector, parameters.value, userId);
+    case 'browser_click':               return browserClick(parameters.selector, userId);
     case 'browser_read_page':           return browserReadPage(parameters.variable_name, parameters.topic);
     case 'browser_extract_results':     return browserExtractResults(parameters.variable_name, parameters.count ?? 10);
     case 'browser_wait_for_element':    return browserWaitForElement(parameters.selector, parameters.seconds ?? 10);
     case 'browser_get_page_state':      return browserGetPageState();
-    case 'browser_screenshot_analyze':  return browserScreenshotAnalyze(parameters.target_description, parameters.action ?? 'click', parameters.value);
+    case 'browser_screenshot_analyze':  return browserScreenshotAnalyze(parameters.target_description, parameters.action ?? 'click', parameters.value, userId);
     case 'type_text':                   return typeText(parameters.text);
     case 'create_file':                 return createFile(parameters.path, parameters.content ?? '');
     case 'create_folder':               return createFolder(parameters.path);
@@ -370,7 +371,7 @@ async function verifyClickEffect(
 
 // ─── browserFill ──────────────────────────────────────────────────────────────
 
-async function browserFill(selector: string | undefined, value: string | undefined): Promise<StepResult> {
+async function browserFill(selector: string | undefined, value: string | undefined, userId?: string): Promise<StepResult> {
   if (!selector) throw new Error('selector is required');
   if (value === undefined) throw new Error('value is required');
   const page = await ensurePlaywright();
@@ -392,7 +393,7 @@ async function browserFill(selector: string | undefined, value: string | undefin
     }
   }
 
-  const result = await smartFindAndAct(page, selector, 'fill', value);
+  const result = await smartFindAndAct(page, selector, 'fill', value, userId);
   await sleep(300);
   return {
     success: true,
@@ -403,7 +404,7 @@ async function browserFill(selector: string | undefined, value: string | undefin
 
 // ─── browserClick ─────────────────────────────────────────────────────────────
 
-async function browserClick(selector: string | undefined): Promise<StepResult> {
+async function browserClick(selector: string | undefined, userId?: string): Promise<StepResult> {
   if (!selector) throw new Error('selector is required');
   const page = await ensurePlaywright();
 
@@ -415,7 +416,7 @@ async function browserClick(selector: string | undefined): Promise<StepResult> {
   await sleep(200 + Math.random() * 300);
 
   const snapshotBefore = await getPageSnapshot(page);
-  const result = await smartFindAndAct(page, selector, 'click');
+  const result = await smartFindAndAct(page, selector, 'click', undefined, userId);
   const verify = await verifyClickEffect(page, snapshotBefore);
 
   const isLinkSelector = selector.includes('h2') || selector.includes('href') ||
@@ -1358,7 +1359,8 @@ process.on('exit', () => { void browserInstance?.close(); });
 async function browserScreenshotAnalyze(
   targetDescription: string | undefined,
   action: 'click' | 'fill' = 'click',
-  value?: string
+  value?: string,
+  userId?: string,
 ): Promise<StepResult> {
   if (!targetDescription) throw new Error('browser_screenshot_analyze requires target_description');
 
@@ -1366,9 +1368,9 @@ async function browserScreenshotAnalyze(
   const screenshot = await page.screenshot({ type: 'jpeg', quality: 80, fullPage: false });
   const base64 = screenshot.toString('base64');
 
-  const geminiKey = process.env.GEMINI_API_KEY;
+  const geminiKey = await getProviderKey('gemini', userId);
   if (!geminiKey || geminiKey === 'your_gemini_api_key_here') {
-    const result = await smartFindAndAct(page, targetDescription, action, value);
+    const result = await smartFindAndAct(page, targetDescription, action, value, userId);
     return { success: true, message: `Action performed (no vision key — used DOM fallback)`, strategy: result.strategy };
   }
 
@@ -1410,7 +1412,7 @@ async function browserScreenshotAnalyze(
   }
 
   const selectorToTry = geminiSelector ?? fallbackText ?? targetDescription;
-  const result = await smartFindAndAct(page, selectorToTry, action, value);
+  const result = await smartFindAndAct(page, selectorToTry, action, value, userId);
 
   return {
     success: true,
