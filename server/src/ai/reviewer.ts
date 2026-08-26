@@ -1,6 +1,7 @@
 import OpenAI from 'openai';
 import Anthropic from '@anthropic-ai/sdk';
 import { Plan, ReviewResult } from '../types';
+import { getProviderKey } from './providerCredentials';
 
 // ─── System Prompt ────────────────────────────────────────────────────────────
 //
@@ -137,9 +138,9 @@ OUTPUT:
 
 // ─── Provider Implementations ─────────────────────────────────────────────────
 
-async function reviewWithGroq(plan: Plan): Promise<string> {
+async function reviewWithGroq(plan: Plan, userId?: string): Promise<string> {
   const client = new OpenAI({
-    apiKey: process.env.GROQ_API_KEY,
+    apiKey: await getProviderKey('groq', userId),
     baseURL: 'https://api.groq.com/openai/v1',
   });
   const response = await client.chat.completions.create({
@@ -155,8 +156,8 @@ async function reviewWithGroq(plan: Plan): Promise<string> {
   return response.choices[0].message.content ?? '';
 }
 
-async function reviewWithAnthropic(plan: Plan): Promise<string> {
-  const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+async function reviewWithAnthropic(plan: Plan, userId?: string): Promise<string> {
+  const client = new Anthropic({ apiKey: await getProviderKey('anthropic', userId) });
   const response = await client.messages.create({
     model: process.env.ANTHROPIC_MODEL ?? 'claude-opus-4-6',
     max_tokens: 600,
@@ -168,8 +169,8 @@ async function reviewWithAnthropic(plan: Plan): Promise<string> {
   return block.text;
 }
 
-async function reviewWithOpenAI(plan: Plan): Promise<string> {
-  const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+async function reviewWithOpenAI(plan: Plan, userId?: string): Promise<string> {
+  const client = new OpenAI({ apiKey: await getProviderKey('openai', userId) });
   const response = await client.chat.completions.create({
     model: process.env.OPENAI_MODEL ?? 'gpt-4o',
     messages: [
@@ -223,16 +224,16 @@ function validateReview(raw: string, plan: Plan): ReviewResult {
 
 // ─── Main Export ──────────────────────────────────────────────────────────────
 
-export async function reviewPlan(plan: Plan): Promise<ReviewResult> {
+export async function reviewPlan(plan: Plan, userId?: string): Promise<ReviewResult> {
   const provider = (process.env.AI_PROVIDER ?? 'groq').toLowerCase();
   console.log(`[Reviewer] Auditing ${plan.steps.length}-step plan...`);
 
   let raw: string;
 
   try {
-    if (provider === 'groq')           raw = await reviewWithGroq(plan);
-    else if (provider === 'anthropic') raw = await reviewWithAnthropic(plan);
-    else                               raw = await reviewWithOpenAI(plan);
+    if (provider === 'groq')           raw = await reviewWithGroq(plan, userId);
+    else if (provider === 'anthropic') raw = await reviewWithAnthropic(plan, userId);
+    else                               raw = await reviewWithOpenAI(plan, userId);
   } catch (err) {
     console.warn('[Reviewer] Provider call failed:', (err as Error).message);
     return buildFallbackReview(plan, (err as Error).message);
