@@ -4,6 +4,7 @@ import { Plan, Capability } from '../types';
 import { selectExamples } from './promptExamples';
 import type {  PlanStep } from '../types/index';
 import { getMemoryForPrompt } from '../utils/memory';
+import { getProviderKey } from './providerCredentials';
 // ─── Static System Prompt ─────────────────────────────────────────────────────
 
 const STATIC_SYSTEM_PROMPT = `You are a JSON compiler. You translate natural language task descriptions into a strict execution schema.
@@ -648,7 +649,7 @@ async function planWithGroq(userPrompt: string): Promise<string> {
 }
 
 async function planWithAnthropic(userPrompt: string): Promise<string> {
-  const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+  const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY ?? '' });
   const response = await client.messages.create({
     model: process.env.ANTHROPIC_MODEL ?? 'claude-opus-4-6',
     max_tokens: 4000,
@@ -661,7 +662,7 @@ async function planWithAnthropic(userPrompt: string): Promise<string> {
 }
 
 async function planWithOpenAI(userPrompt: string): Promise<string> {
-  const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+  const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY ?? '' });
   const response = await client.chat.completions.create({
     model: process.env.OPENAI_MODEL ?? 'gpt-4o',
     messages: [
@@ -812,10 +813,11 @@ function buildMinimalSystemPrompt(): string {
   return [corePrompt, outputSchema].filter(Boolean).join('\n\n');
 }
 
-async function callProvider(provider: string, userPrompt: string, systemPrompt: string): Promise<string> {
+async function callProvider(provider: string, userPrompt: string, systemPrompt: string, userId?: string): Promise<string> {
+  const apiKey = await getProviderKey(provider, userId);
   if (provider === 'groq') {
     const client = new OpenAI({
-      apiKey: process.env.GROQ_API_KEY,
+      apiKey,
       baseURL: 'https://api.groq.com/openai/v1',
     });
     const response = await client.chat.completions.create({
@@ -837,7 +839,7 @@ async function callProvider(provider: string, userPrompt: string, systemPrompt: 
     }
     return choice.message.content ?? '';
   } else if (provider === 'anthropic') {
-    const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+    const client = new Anthropic({ apiKey });
     const response = await client.messages.create({
       model: process.env.ANTHROPIC_MODEL ?? 'claude-opus-4-6',
       max_tokens: 4000,
@@ -848,7 +850,7 @@ async function callProvider(provider: string, userPrompt: string, systemPrompt: 
     if (block.type !== 'text') throw new Error('Unexpected response type from Anthropic');
     return block.text;
   } else if (provider === 'openai') {
-    const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+    const client = new OpenAI({ apiKey });
     const response = await client.chat.completions.create({
       model: process.env.OPENAI_MODEL ?? 'gpt-4o',
       messages: [
@@ -867,7 +869,7 @@ async function callProvider(provider: string, userPrompt: string, systemPrompt: 
 
 // ─── Main Export ──────────────────────────────────────────────────────────────
 
-export async function planTask(userPrompt: string): Promise<Plan> {
+export async function planTask(userPrompt: string, userId?: string): Promise<Plan> {
   const provider = (process.env.AI_PROVIDER ?? 'groq').toLowerCase();
 
   // Truncate user prompt if too long (especially replan prompts)
@@ -884,7 +886,7 @@ export async function planTask(userPrompt: string): Promise<Plan> {
   try {
     const systemPrompt = await buildSystemPrompt(truncatedPrompt);
     console.log(`[Planner] Total request size: system=${systemPrompt.length} + user=${truncatedPrompt.length} = ${systemPrompt.length + truncatedPrompt.length} chars`);
-    raw = await callProvider(provider, truncatedPrompt, systemPrompt);
+    raw = await callProvider(provider, truncatedPrompt, systemPrompt, userId);
   } catch (err) {
     // On 413, retry with a minimal system prompt
     if (is413(err)) {
@@ -896,7 +898,7 @@ export async function planTask(userPrompt: string): Promise<Plan> {
           ? truncatedPrompt.slice(0, 2000) + '\n\n[...truncated]'
           : truncatedPrompt;
         console.log(`[Planner] Retry sizes: system=${minimalPrompt.length} + user=${shortUserPrompt.length} chars`);
-        raw = await callProvider(provider, shortUserPrompt, minimalPrompt);
+        raw = await callProvider(provider, shortUserPrompt, minimalPrompt, userId);
       } catch (retryErr) {
         throw classifyProviderError(provider, retryErr);
       }
@@ -925,6 +927,7 @@ export async function replanFromStep(
   remainingGoal:    string,
   // ── NEW: pass in URLs that are permanently bot-blocked this session ──
   blockedUrls:      string[] = [],
+  userId?:           string,
 ): Promise<Plan | null> {
 
   // ── Build a compact blocked-URL warning block for the prompt ─────────────
@@ -984,7 +987,7 @@ export async function replanFromStep(
   );
 
   try {
-    const newPlan = await planTask(prompt);
+    const newPlan = await planTask(prompt, userId);
 
     if (!newPlan || !newPlan.steps || newPlan.steps.length === 0) {
       console.warn('[Replanner] AI returned an empty plan — will not replan');
