@@ -1,0 +1,59 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id          String       @id @default(uuid())
+  email       String       @unique
+  passwordHash String
+  createdAt   DateTime     @default(now())
+  apiKeys     UserApiKey[]
+  sessions    Session[]
+}
+
+model UserApiKey {
+  id             String   @id @default(uuid())
+  userId         String
+  provider       String
+  encryptedKey   String
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, provider])
+  @@index([userId])
+}
+
+model Session {
+  id           String     @id @default(uuid())
+  userId       String
+  plan         Json
+  status       String
+  currentStep  Int        @default(0)
+  stopped      Boolean    @default(false)
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+  user         User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  stepLogs     StepLog[]
+
+  @@index([userId, createdAt])
+}
+
+model StepLog {
+  id          String   @id @default(uuid())
+  sessionId   String
+  stepNumber  Int
+  status      String
+  result      Json?
+  error       String?
+  durationMs  Int?
+  createdAt   DateTime @default(now())
+  session     Session  @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@index([sessionId, stepNumber])
+}
