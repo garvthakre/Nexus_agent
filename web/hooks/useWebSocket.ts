@@ -17,7 +17,8 @@ export function useWebSocket(url: string) {
     if (wsRef.current && wsRef.current.readyState <= WebSocket.OPEN) return
 
     try {
-      const ws = new WebSocket(url)
+      const token = typeof window !== 'undefined' ? localStorage.getItem('nexus_token') : null
+      const ws = new WebSocket(`${url}${url.includes('?') ? '&' : '?'}token=${encodeURIComponent(token ?? '')}`)
       wsRef.current = ws
 
       ws.onopen = () => {
