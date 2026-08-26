@@ -139,6 +139,8 @@ export interface StepResult {
 // ─── Session ──────────────────────────────────────────────────────────────────
 
 export interface Session {
+  sessionId: string;
+  userId: string;
   plan: Plan;
   status: string;
   currentStep: number;
