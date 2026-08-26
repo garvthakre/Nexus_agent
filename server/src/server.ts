@@ -9,6 +9,8 @@ import { healthRoutes } from './routes/healthRoutes';
 import { planRoutes } from './routes/planRoutes';
 import { executionRoutes } from './routes/executionRoutes';
 import { sessionRoutes } from './routes/sessionRoutes';
+import { authRoutes } from './routes/authRoutes';
+import { keyRoutes } from './routes/keyRoutes';
 
 validateEnv();
 
@@ -22,6 +24,8 @@ app.use(express.json({ limit: '10mb' }));
 setupWebSocket(wss);
 
 app.use(healthRoutes);
+app.use(authRoutes);
+app.use(keyRoutes);
 app.use(planRoutes);
 app.use(executionRoutes);
 app.use(sessionRoutes);
