@@ -6,10 +6,12 @@ import PlanDisplay from '@/components/PlanDisplay'
 import ActivityLog from '@/components/ActivityLog'
 import AgentStatusBar from '@/components/AgentStatusBar'
 import StatCard from '@/components/StatCard'
+import AuthForm from '@/components/AuthForm'
 
 const WS_URL = process.env.NEXT_PUBLIC_WS_URL ?? 'ws://localhost:3001'
 
 export default function HomePage() {
+  if (typeof window !== 'undefined' && !localStorage.getItem('nexus_token')) return <AuthForm />
   const {
     connected,
     loading,
