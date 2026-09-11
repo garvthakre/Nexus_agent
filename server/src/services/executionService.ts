@@ -13,6 +13,8 @@ import {
 } from '../types';
 import { markUrlBlocked, getBlockedUrls, isUrlBlocked } from '../executor/blockedUrlTracker';
 import { logStep, saveSession } from './sessionService';
+import { createTraceRecord, appendTraceStep } from './traceService';
+import { dispatchWebhook } from './webhookService';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -32,9 +34,28 @@ const MAX_RETRIES = 2;
 export async function executeAllSteps(sessionId: string, session: Session): Promise<void> {
   const broadcast = (message: WsMessage): void => broadcastToUser(message, session.userId);
   const { plan } = session;
+  const summary = plan.summary ?? plan.intent ?? 'Execution plan';
+  const intent = plan.intent ?? 'untitled task';
   const results: StepExecutionResult[] = [];
   let totalFailed = 0;
   const startTime = Date.now();
+  const traceId = await createTraceRecord({
+    userId: session.userId,
+    sessionId,
+    prompt: summary,
+    summary,
+    status: 'running',
+    provider: process.env.AI_PROVIDER ?? 'groq',
+    totalSteps: plan.steps.length,
+    successfulSteps: 0,
+    failedSteps: 0,
+    totalTokens: 0,
+    llmLatencyMs: 0,
+    executionLatencyMs: 0,
+    metadata: { sessionId },
+  });
+
+  await dispatchWebhook('execution.started', { sessionId, traceId, summary, stepCount: plan.steps.length }, session.userId);
 
   for (let i = 0; i < plan.steps.length; i++) {
     if (session.stopped) break;
@@ -201,7 +222,7 @@ export async function executeAllSteps(sessionId: string, session: Session): Prom
             }
 
             const newPlan = await replanFromStep(
-              plan.summary,
+              summary,
               completedSteps,
               step,
               lastError,
@@ -269,8 +290,8 @@ export async function executeAllSteps(sessionId: string, session: Session): Prom
     await logExecution({
       timestamp:      new Date().toISOString(),
       sessionId,
-      prompt:         session.plan.summary,
-      intent:         session.plan.intent,
+      prompt:         summary,
+      intent:         intent,
       provider:       process.env.AI_PROVIDER ?? 'groq',
       totalSteps:     plan.steps.length,
       steps:          results.map((r, idx) => ({
@@ -290,7 +311,7 @@ export async function executeAllSteps(sessionId: string, session: Session): Prom
         : 0,
       durationMs: totalDuration,
     });
-    await appendMemory(plan.intent, plan.summary, overallSuccess, plan.steps.length);
+    await appendMemory(intent, summary, overallSuccess, plan.steps.length);
   } else {
     session.status = 'stopped';
     await saveSession(session);
