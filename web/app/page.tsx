@@ -12,6 +12,10 @@ const WS_URL = process.env.NEXT_PUBLIC_WS_URL ?? 'ws://localhost:3001'
 
 export default function HomePage() {
   if (typeof window !== 'undefined' && !localStorage.getItem('nexus_token')) return <AuthForm />
+  return <AuthenticatedHomePage />
+}
+
+function AuthenticatedHomePage() {
   const {
     connected,
     loading,
