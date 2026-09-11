@@ -22,6 +22,7 @@ import * as fs   from 'fs/promises';
 import * as path from 'path';
 import * as os   from 'os';
 import type { PlanStep } from '../types/index';
+import type { WsMessage } from '../types';
 
 // ─── Patch registry ───────────────────────────────────────────────────────────
 
@@ -31,7 +32,7 @@ interface AutoFix {
   fix: (
     error: string,
     step: PlanStep,
-    broadcast: (msg: object) => void,
+    broadcast: (msg: WsMessage) => void,
   ) => Promise<string | null>;
 }
 
@@ -258,7 +259,7 @@ async function getExecAsync() {
 export async function tryAutoFixBeforeRetry(
   step: PlanStep,
   error: string,
-  broadcast: (msg: object) => void,
+  broadcast: (msg: WsMessage) => void,
 ): Promise<string | null> {
 
   for (const autoFix of AUTO_FIXES) {
