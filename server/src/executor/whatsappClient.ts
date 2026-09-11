@@ -137,6 +137,19 @@ export async function findContact(client: any, name: string): Promise<any | null
 
 // ─── Send a WhatsApp message ──────────────────────────────────────────────────
 
+export async function getWhatsAppChats(limit = 10): Promise<Array<{ name: string; unread: number; lastMessage?: string }>> {
+  const client = await getWhatsAppClient();
+  const chats = await client.getChats();
+
+  return chats
+    .slice(0, limit)
+    .map((chat: any) => ({
+      name: chat.name ?? chat.pushname ?? 'Unknown chat',
+      unread: chat.unreadCount ?? 0,
+      lastMessage: chat.lastMessage?.body ?? chat.lastMessage?.text ?? undefined,
+    }));
+}
+
 export async function sendWhatsAppMessage(
   contactName: string,
   message: string,
