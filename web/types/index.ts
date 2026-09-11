@@ -232,3 +232,52 @@ export interface ExecutionLogEntry {
     pageUrl?:     string;
   }>;
 }
+
+export interface TraceStepRecord {
+  id: string
+  traceId: string
+  stepNumber: number
+  capability: string
+  description: string
+  status: string
+  error?: string | null
+  result?: Record<string, unknown> | null
+  screenshotPath?: string | null
+  llmLatencyMs?: number | null
+  executionLatencyMs?: number | null
+  tokenUsage?: number | null
+  startedAt: string
+  completedAt?: string | null
+}
+
+export interface TraceRecord {
+  id: string
+  userId: string
+  sessionId?: string | null
+  prompt: string
+  summary?: string | null
+  status: string
+  provider?: string | null
+  totalSteps: number
+  successfulSteps: number
+  failedSteps: number
+  totalTokens: number
+  llmLatencyMs: number
+  executionLatencyMs: number
+  metadata?: Record<string, unknown> | null
+  createdAt: string
+  updatedAt: string
+  traceSteps?: TraceStepRecord[]
+}
+
+export interface UserWebhookConfig {
+  id: string
+  userId: string
+  name?: string | null
+  url: string
+  events: string[]
+  active: boolean
+  headers?: Record<string, string> | null
+  createdAt: string
+  updatedAt: string
+}
