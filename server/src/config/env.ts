@@ -8,6 +8,10 @@ export function validateEnv(): void {
     missingInfrastructure.push('ENCRYPTION_KEY (must be at least 16 characters)');
   }
 
+  if (process.env.VECTOR_PROVIDER === 'chroma' && !process.env.CHROMA_URL) {
+    missingInfrastructure.push('CHROMA_URL (required when VECTOR_PROVIDER=chroma)');
+  }
+
   const required: Record<string, string[]> = {
     groq:      ['GROQ_API_KEY'],
     anthropic: ['ANTHROPIC_API_KEY'],
