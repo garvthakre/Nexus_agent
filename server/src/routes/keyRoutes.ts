@@ -36,3 +36,15 @@ keyRoutes.get('/api/keys', async (req, res) => {
     res.status(500).json({ error: 'API key service unavailable' });
   }
 });
+
+keyRoutes.delete('/api/keys/:provider', async (req, res) => {
+  try {
+    await prisma.userApiKey.deleteMany({
+      where: { userId: req.user!.userId, provider: req.params.provider },
+    });
+    res.status(204).send();
+  } catch (error) {
+    console.error('[Keys] Delete failed:', error);
+    res.status(500).json({ error: 'API key service unavailable' });
+  }
+});
