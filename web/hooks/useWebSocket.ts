@@ -11,6 +11,7 @@ export function useWebSocket(url: string) {
   const listenersRef      = useRef<Map<symbol, Listener>>(new Map())
   const reconnectTimer    = useRef<ReturnType<typeof setTimeout> | null>(null)
   const mountedRef        = useRef(false)
+  const connectRef        = useRef<() => void>(() => undefined)
 
   const connect = useCallback(() => {
     // Don't open a second socket if one already exists and is open/connecting
@@ -43,7 +44,7 @@ export function useWebSocket(url: string) {
         setConnected(false)
         wsRef.current = null
         console.log('[WS] Disconnected, reconnecting in 3s...')
-        reconnectTimer.current = setTimeout(connect, 3000)
+        reconnectTimer.current = setTimeout(() => connectRef.current(), 3000)
       }
 
       ws.onerror = () => {
@@ -52,7 +53,7 @@ export function useWebSocket(url: string) {
       }
     } catch (e) {
       console.error('[WS] Connection failed', e)
-      reconnectTimer.current = setTimeout(connect, 3000)
+      reconnectTimer.current = setTimeout(() => connectRef.current(), 3000)
     }
   }, [url])
 
@@ -60,6 +61,7 @@ export function useWebSocket(url: string) {
     // Guard against React StrictMode double-invoke
     if (mountedRef.current) return
     mountedRef.current = true
+    connectRef.current = connect
 
     connect()
 
