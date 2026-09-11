@@ -5,6 +5,8 @@ import { selectExamples } from './promptExamples';
 import type {  PlanStep } from '../types/index';
 import { getMemoryForPrompt } from '../utils/memory';
 import { getProviderKey } from './providerCredentials';
+import { searchToolExamples, searchUserContext } from '../utils/chromaMemory';
+import { getToolRegistry } from '../tools/registry';
 // ─── Static System Prompt ─────────────────────────────────────────────────────
 
 const STATIC_SYSTEM_PROMPT = `You are a JSON compiler. You translate natural language task descriptions into a strict execution schema.
@@ -579,19 +581,42 @@ async function buildSystemPrompt(userPrompt: string): Promise<string> {
   let examplesBlock = formatCompactExample(userPrompt);
   let memory = (await getMemoryForPrompt()).slice(0, 1000);
 
+  const vectorMemory = process.env.VECTOR_PROVIDER === 'chroma'
+    ? await (async () => {
+        const userId = process.env.DEFAULT_USER_ID ?? 'default';
+        const relevantUserContext = await searchUserContext(userId, userPrompt, 3);
+        const relevantExamples = await searchToolExamples(userPrompt, 2);
+
+        const contextLines = relevantUserContext.length > 0
+          ? ['USER CONTEXT (semantic retrieval):', ...relevantUserContext.map((item, idx) => `- [${idx + 1}] ${item.document.trim()}`)]
+          : [];
+
+        const exampleLines = relevantExamples.length > 0
+          ? ['RELEVANT TOOL EXAMPLES (semantic retrieval):', ...relevantExamples.map((item, idx) => `- [${idx + 1}] ${item.document.trim()}`)]
+          : [];
+
+        return [...contextLines, ...exampleLines].join('\n');
+      })()
+    : '';
+
   // Assemble and enforce hard character budget
-  let prompt = [corePrompt, ...sections, outputSchema, memory, examplesBlock].filter(Boolean).join('\n\n');
+  let prompt = [corePrompt, ...sections, outputSchema, memory, vectorMemory, examplesBlock].filter(Boolean).join('\n\n');
 
   // Progressive stripping if over budget: examples -> memory -> sections (least relevant first)
   if (prompt.length > SYSTEM_PROMPT_CHAR_BUDGET) {
     console.warn(`[Planner] Prompt over budget (${prompt.length} chars). Stripping examples...`);
     examplesBlock = '';
-    prompt = [corePrompt, ...sections, outputSchema, memory].filter(Boolean).join('\n\n');
+    prompt = [corePrompt, ...sections, outputSchema, memory, vectorMemory].filter(Boolean).join('\n\n');
   }
 
   if (prompt.length > SYSTEM_PROMPT_CHAR_BUDGET) {
     console.warn(`[Planner] Still over budget (${prompt.length} chars). Stripping memory...`);
     memory = '';
+    prompt = [corePrompt, ...sections, outputSchema, vectorMemory].filter(Boolean).join('\n\n');
+  }
+
+  if (prompt.length > SYSTEM_PROMPT_CHAR_BUDGET) {
+    console.warn(`[Planner] Still over budget (${prompt.length} chars). Stripping Chroma context...`);
     prompt = [corePrompt, ...sections, outputSchema].filter(Boolean).join('\n\n');
   }
 
@@ -653,7 +678,7 @@ async function planWithAnthropic(userPrompt: string): Promise<string> {
   const response = await client.messages.create({
     model: process.env.ANTHROPIC_MODEL ?? 'claude-opus-4-6',
     max_tokens: 4000,
-    system: buildSystemPrompt(userPrompt),
+    system: await buildSystemPrompt(userPrompt),
     messages: [{ role: 'user', content: userPrompt }],
   });
   const block = response.content[0];
@@ -666,7 +691,7 @@ async function planWithOpenAI(userPrompt: string): Promise<string> {
   const response = await client.chat.completions.create({
     model: process.env.OPENAI_MODEL ?? 'gpt-4o',
     messages: [
-      { role: 'system', content: buildSystemPrompt(userPrompt) },
+      { role: 'system', content: await buildSystemPrompt(userPrompt) },
       { role: 'user',   content: userPrompt },
     ],
     response_format: { type: 'json_object' },
@@ -678,21 +703,60 @@ async function planWithOpenAI(userPrompt: string): Promise<string> {
 
 // ─── Validation ───────────────────────────────────────────────────────────────
 
-const VALID_CAPABILITIES: Capability[] = [
-  'open_application', 'set_wallpaper', 'run_shell_command',
-  'browser_open', 'browser_fill', 'browser_click', 'browser_read_page', 'browser_extract_results',
-  'browser_wait_for_element', 'browser_get_page_state','browser_screenshot',
-  'type_text', 'create_file', 'create_folder', 'wait', 'download_file',
-  'app_find_window', 'app_focus_window', 'app_click', 'app_type','whatsapp_send', 'whatsapp_get_chats','whatsapp_call',
-];
+const VALID_CAPABILITIES: Capability[] = getToolRegistry().listNames() as Capability[];
 
-function validatePlan(raw: string): Plan {
-  let json = raw.trim();
-  if (json.startsWith('```')) {
-    json = json.replace(/^```(?:json)?\n?/, '').replace(/\n?```$/, '').trim();
+function extractJsonObjects(raw: string): string[] {
+  const text = raw.trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
+  const candidates: string[] = [];
+
+  for (let start = text.indexOf('{'); start >= 0; start = text.indexOf('{', start + 1)) {
+    let depth = 0;
+    let inString = false;
+    let escaped = false;
+
+    for (let index = start; index < text.length; index += 1) {
+      const character = text[index];
+      if (inString) {
+        if (escaped) escaped = false;
+        else if (character === '\\') escaped = true;
+        else if (character === '"') inString = false;
+        continue;
+      }
+
+      if (character === '"') inString = true;
+      else if (character === '{') depth += 1;
+      else if (character === '}') {
+        depth -= 1;
+        if (depth === 0) {
+          candidates.push(text.slice(start, index + 1));
+          break;
+        }
+      }
+    }
   }
 
-  const plan = JSON.parse(json) as Plan;
+  return candidates;
+}
+
+function validatePlan(raw: string): Plan {
+  let lastError: unknown;
+  for (const candidateText of extractJsonObjects(raw).reverse()) {
+    try {
+      const candidate = JSON.parse(candidateText) as Plan;
+      if (!Array.isArray(candidate.steps) || candidate.steps.length === 0) continue;
+      if (typeof candidate.intent !== 'string' || !candidate.intent.trim()) continue;
+      if (typeof candidate.summary !== 'string' || !candidate.summary.trim()) continue;
+      return validatePlanObject(candidate);
+    } catch (error) {
+      lastError = error;
+    }
+  }
+
+  if (lastError instanceof Error) throw lastError;
+  throw new Error('AI response did not contain a valid execution plan with steps');
+}
+
+function validatePlanObject(plan: Plan): Plan {
 
   if (!plan.steps || !Array.isArray(plan.steps) || plan.steps.length === 0) {
     throw new Error('Plan must have at least one step');
