@@ -14,6 +14,8 @@ model User {
   createdAt   DateTime     @default(now())
   apiKeys     UserApiKey[]
   sessions    Session[]
+  traces      Trace[]
+  webhooks    UserWebhook[]
 }
 
 model UserApiKey {
@@ -56,4 +58,62 @@ model StepLog {
   session     Session  @relation(fields: [sessionId], references: [id], onDelete: Cascade)
 
   @@index([sessionId, stepNumber])
+}
+
+model Trace {
+  id                  String      @id @default(uuid())
+  userId              String
+  sessionId           String?
+  prompt              String
+  summary             String?
+  status              String
+  provider            String?
+  totalSteps          Int         @default(0)
+  successfulSteps     Int         @default(0)
+  failedSteps         Int         @default(0)
+  totalTokens         Int         @default(0)
+  llmLatencyMs        Int         @default(0)
+  executionLatencyMs  Int         @default(0)
+  metadata            Json?
+  createdAt           DateTime    @default(now())
+  updatedAt           DateTime    @updatedAt
+  user                User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  traceSteps          TraceStep[]
+
+  @@index([userId, createdAt])
+}
+
+model TraceStep {
+  id                  String   @id @default(uuid())
+  traceId             String
+  stepNumber          Int
+  capability          String
+  description         String
+  status              String
+  error               String?
+  result              Json?
+  screenshotPath      String?
+  llmLatencyMs        Int?
+  executionLatencyMs  Int?
+  tokenUsage          Int?
+  startedAt           DateTime @default(now())
+  completedAt         DateTime?
+  trace               Trace    @relation(fields: [traceId], references: [id], onDelete: Cascade)
+
+  @@index([traceId, stepNumber])
+}
+
+model UserWebhook {
+  id          String   @id @default(uuid())
+  userId      String
+  name        String?
+  url         String
+  events      Json
+  active      Boolean  @default(true)
+  headers     Json?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, active])
 }
