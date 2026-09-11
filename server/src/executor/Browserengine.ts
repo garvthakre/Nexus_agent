@@ -337,7 +337,9 @@ async function scanInteractiveElements(
 
 async function getAccessibilitySnapshot(page: import('playwright').Page): Promise<string> {
   try {
-    const snapshot = await page.accessibility.snapshot({ interestingOnly: true });
+    const accessibility = (page as any).accessibility;
+    if (!accessibility || typeof accessibility.snapshot !== 'function') return '';
+    const snapshot = await accessibility.snapshot({ interestingOnly: true });
     if (!snapshot) return '';
     return JSON.stringify(snapshot, null, 2).slice(0, 3000);
   } catch {
