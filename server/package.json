@@ -8,19 +8,19 @@
     "start": "node dist/server.js",
     "auth": "ts-node scripts/authSetup.ts",
     "dev": "ts-node-dev --respawn --transpile-only src/server.ts",
-    "typecheck": "tsc --noEmit"
-    ,"db:generate": "prisma generate"
-    ,"db:migrate": "prisma migrate dev"
+    "typecheck": "tsc --noEmit",
+    "db:generate": "prisma generate",
+    "db:migrate": "prisma migrate dev"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.39.0",
     "@prisma/client": "^6.19.3",
     "bcrypt": "^6.0.0",
+    "chromadb": "^3.5.0",
     "cors": "^2.8.5",
     "dotenv": "^16.4.1",
     "express": "^4.18.2",
     "jsonwebtoken": "^9.0.3",
-    "node-wallpaper": "^6.0.2",
     "openai": "^4.28.0",
     "playwright": "^1.41.2",
     "playwright-extra": "^4.3.6",
