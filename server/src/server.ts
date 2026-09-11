@@ -11,6 +11,8 @@ import { executionRoutes } from './routes/executionRoutes';
 import { sessionRoutes } from './routes/sessionRoutes';
 import { authRoutes } from './routes/authRoutes';
 import { keyRoutes } from './routes/keyRoutes';
+import { traceRoutes } from './routes/traceRoutes';
+import { webhookRoutes } from './routes/webhookRoutes';
 
 validateEnv();
 
@@ -29,6 +31,8 @@ app.use(keyRoutes);
 app.use(planRoutes);
 app.use(executionRoutes);
 app.use(sessionRoutes);
+app.use(traceRoutes);
+app.use(webhookRoutes);
 
 const PORT = parseInt(process.env.PORT ?? '3001', 10);
 server.listen(PORT, () => {
