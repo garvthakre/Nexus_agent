@@ -90,7 +90,10 @@ export interface StepParameters {
   // set_wallpaper
   query?: string;
 
-  // whatsapp_call
+  // whatsapp_send / whatsapp_get_chats / whatsapp_call
+  contact?: string;
+  message?: string;
+  limit?: number;
   call_type?: 'voice' | 'video';
 }
 
@@ -193,6 +196,80 @@ export interface StepExecutionResult {
   result?: StepResult;
   error?: string;
   duration?: number;
+}
+
+export interface ReviewResult {
+  verdict: 'SAFE' | 'REVIEW_REQUIRED' | 'UNSAFE';
+  confidence: number;
+  risks: string[];
+  safe_steps: number[];
+  risky_steps: number[];
+  recommendation: string;
+}
+
+export interface TraceStepRecord {
+  id: string;
+  traceId: string;
+  stepNumber: number;
+  capability: string;
+  description: string;
+  status: string;
+  error?: string | null;
+  result?: Record<string, unknown> | null;
+  screenshotPath?: string | null;
+  llmLatencyMs?: number | null;
+  executionLatencyMs?: number | null;
+  tokenUsage?: number | null;
+  startedAt: string;
+  completedAt?: string | null;
+}
+
+export interface TraceRecord {
+  id: string;
+  userId: string;
+  sessionId?: string | null;
+  prompt: string;
+  summary?: string | null;
+  status: string;
+  provider?: string | null;
+  totalSteps: number;
+  successfulSteps: number;
+  failedSteps: number;
+  totalTokens: number;
+  llmLatencyMs: number;
+  executionLatencyMs: number;
+  metadata?: Record<string, unknown> | null;
+  createdAt: string;
+  updatedAt: string;
+  traceSteps?: TraceStepRecord[];
+}
+
+export interface UserWebhookConfig {
+  id: string;
+  userId: string;
+  name?: string | null;
+  url: string;
+  events: string[];
+  active: boolean;
+  headers?: Record<string, string> | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ToolExecutionContext {
+  userId?: string;
+  sessionId?: string;
+  traceId?: string;
+  metadata?: Record<string, unknown>;
+}
+
+export interface ToolDefinition<TParams = Record<string, unknown>> {
+  name: string;
+  description: string;
+  inputSchema: Record<string, unknown>;
+  source: 'builtin' | 'mcp';
+  handler: (params: TParams, context?: ToolExecutionContext) => Promise<unknown>;
+  metadata?: Record<string, unknown>;
 }
 
 
