@@ -1,0 +1,11 @@
+WHAT IF YOUR COMPUTER COULD THINK & ACT FOR YOU?
+
+Meet NEXUS — The local autonomous AI task execution engine. 
+Describe any task in plain English and Nexus generates a multi-step plan, verifies it with a local Safety Gateway, and executes every step live.
+
+• 🌐 Autonomous Web Scraping & Research (Bing + Playwright)
+• 📄 Excel & Document Synthesis
+• 💬 Local App & Desktop Automation
+• 🛡️ 100% Local Execution • Zero Cloud Lock-In
+
+Open source on GitHub. Try it today! #AI #Automation #OpenSource #NextJS

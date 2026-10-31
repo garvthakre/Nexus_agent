@@ -1,0 +1,9 @@
+node_modules
+npm-debug.log*
+dist
+.env
+.env.*
+!.env.example
+nexus-logs
+whatsapp-session
+.wwebjs_cache

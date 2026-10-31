@@ -1,0 +1,14 @@
+.git
+.gitignore
+.env
+.env.*
+!.env.example
+node_modules
+**/node_modules
+**/.next
+**/dist
+**/nexus-logs
+**/whatsapp-session
+**/.wwebjs_cache
+docker-compose*.yml
+queue-backup.sql

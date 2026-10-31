@@ -13,6 +13,8 @@ import { authRoutes } from './routes/authRoutes';
 import { keyRoutes } from './routes/keyRoutes';
 import { traceRoutes } from './routes/traceRoutes';
 import { webhookRoutes } from './routes/webhookRoutes';
+import { scheduleRoutes } from './routes/scheduleRoutes';
+import { startSchedulerDaemon } from './services/schedulerDaemon';
 
 validateEnv();
 
@@ -33,6 +35,7 @@ app.use(executionRoutes);
 app.use(sessionRoutes);
 app.use(traceRoutes);
 app.use(webhookRoutes);
+app.use(scheduleRoutes);
 
 const PORT = parseInt(process.env.PORT ?? '3001', 10);
 server.listen(PORT, () => {
@@ -41,4 +44,8 @@ server.listen(PORT, () => {
   WS   : ws://localhost:${PORT}
   AI   : ${(process.env.AI_PROVIDER ?? 'groq').padEnd(28)}
   `);
+
+  startSchedulerDaemon().catch((err) =>
+    console.error('[Scheduler] Daemon startup failed:', err),
+  );
 });

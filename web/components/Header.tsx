@@ -15,6 +15,7 @@ export default function Header({ connected }: HeaderProps) {
   const navigation = [
     { href: '/', label: 'Dashboard' },
     { href: '/history', label: 'History' },
+    { href: '/schedules', label: 'Schedules' },
     { href: '/webhooks', label: 'Webhooks' },
     { href: '/settings', label: 'Settings' },
   ]

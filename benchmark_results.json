@@ -1,0 +1,351 @@
+{
+  "metadata": {
+    "suite": "Paytm Build for India AI Hackathon - Track 3 Benchmark",
+    "agent": "Nexus AI Autonomous Teammate",
+    "timestamp": "2026-10-26T09:09:21.625Z",
+    "targetEnvironment": "Local Mock Fintech Support Console (mock_fintech_dashboard.html)"
+  },
+  "summary": {
+    "totalTasks": 18,
+    "successfulTasks": 17,
+    "failedTasks": 1,
+    "overallSuccessRatePercent": 94.4,
+    "avgResolutionTimeSec": 0.9,
+    "totalSelfHealingRecoveries": 7,
+    "avgCostPerTaskUsd": 0.001995,
+    "totalEstimatedCostUsd": 0.03591
+  },
+  "results": [
+    {
+      "taskId": "TASK-01",
+      "category": "Failed Payment Dispute",
+      "task": "Check status of failed payment TXN_9011 and raise dispute for Rohan Sharma",
+      "success": true,
+      "stepsTaken": 6,
+      "timeTakenMs": 1176,
+      "timeTakenSec": 1.18,
+      "modelsUsed": [
+        "llama-3.3-70b (planner)",
+        "llama-3.3-70b (reviewer)"
+      ],
+      "modelSwitches": 1,
+      "selfHealingRecoveries": 0,
+      "estimatedTokens": 2870,
+      "estimatedCostUsd": 0.001787,
+      "error": null
+    },
+    {
+      "taskId": "TASK-02",
+      "category": "Failed Payment Dispute",
+      "task": "Lookup failed payment TXN_9012 and flag for merchant escalation",
+      "success": true,
+      "stepsTaken": 6,
+      "timeTakenMs": 1754,
+      "timeTakenSec": 1.75,
+      "modelsUsed": [
+        "llama-3.3-70b (planner)",
+        "llama-3.3-70b (reviewer)",
+        "groq-llama-3.3-70b (tier1-fuzzy-recovery)"
+      ],
+      "modelSwitches": 2,
+      "selfHealingRecoveries": 1,
+      "estimatedTokens": 3755,
+      "estimatedCostUsd": 0.002322,
+      "error": null
+    },
+    {
+      "taskId": "TASK-03",
+      "category": "Failed Payment Dispute",
+      "task": "Investigate failed UPI payment TXN_9014 with status code U16",
+      "success": true,
+      "stepsTaken": 6,
+      "timeTakenMs": 211,
+      "timeTakenSec": 0.21,
+      "modelsUsed": [
+        "llama-3.3-70b (planner)",
+        "llama-3.3-70b (reviewer)"
+      ],
+      "modelSwitches": 1,
+      "selfHealingRecoveries": 0,
+      "estimatedTokens": 2870,
+      "estimatedCostUsd": 0.001787,
+      "error": null
+    },
+    {
+      "taskId": "TASK-04",
+      "category": "Failed Payment Dispute",
+      "task": "Review disputed payment TXN_9015 and verify bank debit reference",
+      "success": true,
+      "stepsTaken": 6,
+      "timeTakenMs": 1581,
+      "timeTakenSec": 1.58,
+      "modelsUsed": [
+        "llama-3.3-70b (planner)",
+        "llama-3.3-70b (reviewer)",
+        "groq-llama-3.3-70b (tier1-fuzzy-recovery)"
+      ],
+      "modelSwitches": 2,
+      "selfHealingRecoveries": 1,
+      "estimatedTokens": 3755,
+      "estimatedCostUsd": 0.002322,
+      "error": null
+    },
+    {
+      "taskId": "TASK-05",
+      "category": "Refund Request",
+      "task": "Process full refund for damaged electronic item under order ORD_4101",
+      "success": true,
+      "stepsTaken": 6,
+      "timeTakenMs": 247,
+      "timeTakenSec": 0.25,
+      "modelsUsed": [
+        "llama-3.3-70b (planner)",
+        "llama-3.3-70b (reviewer)"
+      ],
+      "modelSwitches": 1,
+      "selfHealingRecoveries": 0,
+      "estimatedTokens": 2870,
+      "estimatedCostUsd": 0.001787,
+      "error": null
+    },
+    {
+      "taskId": "TASK-06",
+      "category": "Refund Request",
+      "task": "Check refund eligibility and submit request for order ORD_4102",
+      "success": true,
+      "stepsTaken": 6,
+      "timeTakenMs": 1579,
+      "timeTakenSec": 1.58,
+      "modelsUsed": [
+        "llama-3.3-70b (planner)",
+        "llama-3.3-70b (reviewer)",
+        "groq-llama-3.3-70b (tier1-fuzzy-recovery)"
+      ],
+      "modelSwitches": 2,
+      "selfHealingRecoveries": 1,
+      "estimatedTokens": 3755,
+      "estimatedCostUsd": 0.002322,
+      "error": null
+    },
+    {
+      "taskId": "TASK-07",
+      "category": "Refund Request",
+      "task": "Authorize pending customer refund request for order ORD_4103",
+      "success": true,
+      "stepsTaken": 6,
+      "timeTakenMs": 272,
+      "timeTakenSec": 0.27,
+      "modelsUsed": [
+        "llama-3.3-70b (planner)",
+        "llama-3.3-70b (reviewer)"
+      ],
+      "modelSwitches": 1,
+      "selfHealingRecoveries": 0,
+      "estimatedTokens": 2870,
+      "estimatedCostUsd": 0.001787,
+      "error": null
+    },
+    {
+      "taskId": "TASK-08",
+      "category": "Refund Request",
+      "task": "Reject ineligible refund claim on expired return window for ORD_4104",
+      "success": true,
+      "stepsTaken": 6,
+      "timeTakenMs": 1584,
+      "timeTakenSec": 1.58,
+      "modelsUsed": [
+        "llama-3.3-70b (planner)",
+        "llama-3.3-70b (reviewer)",
+        "groq-llama-3.3-70b (tier1-fuzzy-recovery)"
+      ],
+      "modelSwitches": 2,
+      "selfHealingRecoveries": 1,
+      "estimatedTokens": 3755,
+      "estimatedCostUsd": 0.002322,
+      "error": null
+    },
+    {
+      "taskId": "TASK-09",
+      "category": "Settlement Status Check",
+      "task": "Check settlement batch status and UTR for merchant MID_501",
+      "success": true,
+      "stepsTaken": 6,
+      "timeTakenMs": 263,
+      "timeTakenSec": 0.26,
+      "modelsUsed": [
+        "llama-3.3-70b (planner)",
+        "llama-3.3-70b (reviewer)"
+      ],
+      "modelSwitches": 1,
+      "selfHealingRecoveries": 0,
+      "estimatedTokens": 2870,
+      "estimatedCostUsd": 0.001787,
+      "error": null
+    },
+    {
+      "taskId": "TASK-10",
+      "category": "Settlement Status Check",
+      "task": "Lookup delayed settlement for merchant MID_502 and re-trigger transfer",
+      "success": true,
+      "stepsTaken": 6,
+      "timeTakenMs": 1678,
+      "timeTakenSec": 1.68,
+      "modelsUsed": [
+        "llama-3.3-70b (planner)",
+        "llama-3.3-70b (reviewer)",
+        "groq-llama-3.3-70b (tier1-fuzzy-recovery)"
+      ],
+      "modelSwitches": 2,
+      "selfHealingRecoveries": 1,
+      "estimatedTokens": 3755,
+      "estimatedCostUsd": 0.002322,
+      "error": null
+    },
+    {
+      "taskId": "TASK-11",
+      "category": "Settlement Status Check",
+      "task": "Verify weekend reconciliation settlement balance for merchant MID_503",
+      "success": true,
+      "stepsTaken": 6,
+      "timeTakenMs": 252,
+      "timeTakenSec": 0.25,
+      "modelsUsed": [
+        "llama-3.3-70b (planner)",
+        "llama-3.3-70b (reviewer)"
+      ],
+      "modelSwitches": 1,
+      "selfHealingRecoveries": 0,
+      "estimatedTokens": 2870,
+      "estimatedCostUsd": 0.001787,
+      "error": null
+    },
+    {
+      "taskId": "TASK-12",
+      "category": "Duplicate Charge",
+      "task": "Identify duplicate charge DUP_801 on phone 9876543210 and issue reversal",
+      "success": true,
+      "stepsTaken": 6,
+      "timeTakenMs": 207,
+      "timeTakenSec": 0.21,
+      "modelsUsed": [
+        "llama-3.3-70b (planner)",
+        "llama-3.3-70b (reviewer)"
+      ],
+      "modelSwitches": 1,
+      "selfHealingRecoveries": 0,
+      "estimatedTokens": 2870,
+      "estimatedCostUsd": 0.001787,
+      "error": null
+    },
+    {
+      "taskId": "TASK-13",
+      "category": "Duplicate Charge",
+      "task": "Verify duplicate debit DUP_802 within 5-second interval and initiate refund",
+      "success": true,
+      "stepsTaken": 6,
+      "timeTakenMs": 1552,
+      "timeTakenSec": 1.55,
+      "modelsUsed": [
+        "llama-3.3-70b (planner)",
+        "llama-3.3-70b (reviewer)",
+        "groq-llama-3.3-70b (tier1-fuzzy-recovery)"
+      ],
+      "modelSwitches": 2,
+      "selfHealingRecoveries": 1,
+      "estimatedTokens": 3755,
+      "estimatedCostUsd": 0.002322,
+      "error": null
+    },
+    {
+      "taskId": "TASK-14",
+      "category": "Duplicate Charge",
+      "task": "Inspect reported duplicate transaction DUP_803 and dismiss as valid separate purchase",
+      "success": true,
+      "stepsTaken": 6,
+      "timeTakenMs": 229,
+      "timeTakenSec": 0.23,
+      "modelsUsed": [
+        "llama-3.3-70b (planner)",
+        "llama-3.3-70b (reviewer)"
+      ],
+      "modelSwitches": 1,
+      "selfHealingRecoveries": 0,
+      "estimatedTokens": 2870,
+      "estimatedCostUsd": 0.001787,
+      "error": null
+    },
+    {
+      "taskId": "TASK-15",
+      "category": "KYC Status Lookup",
+      "task": "Lookup KYC verification status for user USR_701 by PAN ABCDE1234F",
+      "success": true,
+      "stepsTaken": 6,
+      "timeTakenMs": 214,
+      "timeTakenSec": 0.21,
+      "modelsUsed": [
+        "llama-3.3-70b (planner)",
+        "llama-3.3-70b (reviewer)"
+      ],
+      "modelSwitches": 1,
+      "selfHealingRecoveries": 0,
+      "estimatedTokens": 2870,
+      "estimatedCostUsd": 0.001787,
+      "error": null
+    },
+    {
+      "taskId": "TASK-16",
+      "category": "KYC Status Lookup",
+      "task": "Check pending video KYC status for customer USR_702 and re-trigger V-KYC link",
+      "success": true,
+      "stepsTaken": 6,
+      "timeTakenMs": 1567,
+      "timeTakenSec": 1.57,
+      "modelsUsed": [
+        "llama-3.3-70b (planner)",
+        "llama-3.3-70b (reviewer)",
+        "groq-llama-3.3-70b (tier1-fuzzy-recovery)"
+      ],
+      "modelSwitches": 2,
+      "selfHealingRecoveries": 1,
+      "estimatedTokens": 3755,
+      "estimatedCostUsd": 0.002322,
+      "error": null
+    },
+    {
+      "taskId": "TASK-17",
+      "category": "KYC Status Lookup",
+      "task": "Verify rejected KYC status for USR_703 and request document re-upload",
+      "success": true,
+      "stepsTaken": 6,
+      "timeTakenMs": 336,
+      "timeTakenSec": 0.34,
+      "modelsUsed": [
+        "llama-3.3-70b (planner)",
+        "llama-3.3-70b (reviewer)"
+      ],
+      "modelSwitches": 1,
+      "selfHealingRecoveries": 0,
+      "estimatedTokens": 2870,
+      "estimatedCostUsd": 0.001787,
+      "error": null
+    },
+    {
+      "taskId": "TASK-18",
+      "category": "KYC Status Lookup (Edge Case Failure)",
+      "task": "Lookup KYC verification for non-existent record USR_9999 and escalate",
+      "success": false,
+      "stepsTaken": 5,
+      "timeTakenMs": 1449,
+      "timeTakenSec": 1.45,
+      "modelsUsed": [
+        "llama-3.3-70b (planner)",
+        "llama-3.3-70b (reviewer)"
+      ],
+      "modelSwitches": 1,
+      "selfHealingRecoveries": 0,
+      "estimatedTokens": 2870,
+      "estimatedCostUsd": 0.001787,
+      "error": "Element not found for selector \"#btn-kyc-9999\" (all tiers exhausted)"
+    }
+  ]
+}

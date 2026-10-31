@@ -1,5 +1,5 @@
 import { Plan, ReviewResult, ExecutionState } from '@/types'
-import type { TraceRecord, UserWebhookConfig } from '@/types'
+import type { TraceRecord, UserWebhookConfig, ScheduleRecord } from '@/types'
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001'
 
@@ -47,8 +47,7 @@ export const api = {
   listKeys: () => fetchAPI<ApiKeyRecord[]>('/api/keys'),
   saveKey: (provider: string, key: string) => fetchAPI('/api/keys', { method: 'POST', body: JSON.stringify({ provider, key }) }),
   deleteKey: (provider: string) => fetchAPI<void>(`/api/keys/${encodeURIComponent(provider)}`, { method: 'DELETE' }),
-  health: () =>
-    fetchAPI<HealthResponse>('/api/health'),
+  health: () => fetchAPI<HealthResponse>('/api/health'),
 
   plan: (prompt: string) =>
     fetchAPI<PlanResponse>('/api/plan', {
@@ -83,4 +82,14 @@ export const api = {
   createWebhook: (data: { name?: string; url: string; events: string[] }) => fetchAPI<{ webhook: UserWebhookConfig }>('/api/webhooks', { method: 'POST', body: JSON.stringify(data) }),
   deleteWebhook: (webhookId: string) => fetchAPI<void>(`/api/webhooks/${webhookId}`, { method: 'DELETE' }),
   testWebhook: (webhookId: string) => fetchAPI<{ status: string; event: string }>(`/api/webhooks/${webhookId}/test`, { method: 'POST' }),
+
+  listSchedules: async () => (await fetchAPI<{ schedules: ScheduleRecord[] }>('/api/schedules')).schedules,
+  getSchedule: async (id: string) => (await fetchAPI<{ schedule: ScheduleRecord }>(`/api/schedules/${id}`)).schedule,
+  createSchedule: (data: { name: string; prompt: string; cronExpression: string; enabled?: boolean }) =>
+    fetchAPI<{ schedule: ScheduleRecord }>('/api/schedules', { method: 'POST', body: JSON.stringify(data) }),
+  updateSchedule: (id: string, data: { name?: string; prompt?: string; cronExpression?: string; enabled?: boolean }) =>
+    fetchAPI<{ schedule: ScheduleRecord }>(`/api/schedules/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
+  deleteSchedule: (id: string) => fetchAPI<void>(`/api/schedules/${id}`, { method: 'DELETE' }),
+  runScheduleNow: (id: string) =>
+    fetchAPI<{ message: string; sessionId: string; status: string }>(`/api/schedules/${id}/run`, { method: 'POST' }),
 }

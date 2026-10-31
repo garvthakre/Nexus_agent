@@ -1,0 +1,578 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=1920, height=1080">
+<title>NEXUS — Studio Launch Video</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+
+<style>
+  /* ── Reset ────────────────────────────────────── */
+  *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+  :root {
+    --bg: #03030a;
+    --s1: #070712;
+    --s2: #0c0c1e;
+    --border-glass: rgba(0, 229, 255, 0.25);
+    --border-subtle: rgba(255, 255, 255, 0.12);
+    --cyan: #00e5ff;
+    --green: #00ffa3;
+    --ntext: #f0f0ff;
+    --muted: #9494c4;
+    --snap: cubic-bezier(0.16, 1, 0.3, 1);
+    --elastic: cubic-bezier(0.34, 1.56, 0.64, 1);
+  }
+
+  body {
+    width: 1920px; height: 1080px;
+    overflow: hidden;
+    background: var(--bg);
+    font-family: 'DM Sans', sans-serif;
+    color: var(--ntext);
+    -webkit-font-smoothing: antialiased;
+    position: relative;
+  }
+
+  /* ── Ambient Spatial Canvas ───────────────────── */
+  .ambient {
+    position: absolute; inset: 0;
+    background-image:
+      radial-gradient(ellipse 65% 50% at 50% 35%, rgba(0,229,255,0.07) 0%, transparent 70%),
+      linear-gradient(rgba(0,229,255,0.02) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(0,229,255,0.02) 1px, transparent 1px);
+    background-size: 100% 100%, 48px 48px, 48px 48px;
+    z-index: 1;
+  }
+
+  .scene {
+    position: absolute; inset: 0;
+    display: flex; align-items: center; justify-content: center;
+    z-index: 10;
+  }
+
+  /* ══════════ ANIMATION LIBRARY ══════════ */
+
+  /* Blur-to-sharp cascade (camera pull focus) */
+  @keyframes blurSharp {
+    0%   { opacity: 0; filter: blur(8px); transform: scale(0.96) translateY(14px); }
+    100% { opacity: 1; filter: blur(0px); transform: scale(1) translateY(0); }
+  }
+
+  /* Split-text word reveal (slides up from mask) */
+  @keyframes wordUp {
+    0%   { transform: translateY(110%); }
+    100% { transform: translateY(0%); }
+  }
+
+  /* Gentle fade + lift */
+  @keyframes fadeUp {
+    0%   { opacity: 0; transform: translateY(18px); }
+    100% { opacity: 1; transform: translateY(0); }
+  }
+
+  /* Hero 3D fly-in with optical blur */
+  @keyframes heroFly {
+    0%   { opacity: 0; transform: perspective(1200px) rotateX(8deg) scale(0.88) translateY(55px); filter: blur(10px); }
+    55%  { filter: blur(0px); }
+    100% { opacity: 1; transform: perspective(1200px) rotateX(2deg) scale(1) translateY(0); filter: blur(0px); }
+  }
+
+  /* Badge elastic pop with blur */
+  @keyframes badgePop {
+    0%   { opacity: 0; transform: scale(0.5) translateY(14px); filter: blur(6px); }
+    60%  { opacity: 1; transform: scale(1.08) translateY(-3px); filter: blur(0px); }
+    100% { opacity: 1; transform: scale(1) translateY(0); filter: blur(0px); }
+  }
+
+  /* Clip-path curtain reveal (editorial wipe) */
+  @keyframes curtain {
+    0%   { clip-path: inset(100% 0 0 0 round 16px); opacity: 0; }
+    35%  { opacity: 1; }
+    100% { clip-path: inset(0 0 0 0 round 16px); opacity: 1; }
+  }
+
+  /* Logo slam with elastic overshoot */
+  @keyframes logoSlam {
+    0%   { opacity: 0; transform: scale(0.3); filter: blur(14px); }
+    60%  { opacity: 1; transform: scale(1.18); filter: blur(0px); }
+    100% { opacity: 1; transform: scale(1); filter: blur(0px); }
+  }
+
+  /* Status dot ping ripple */
+  @keyframes ping {
+    0%   { transform: scale(1); opacity: 0.75; }
+    100% { transform: scale(3); opacity: 0; }
+  }
+
+  /* ══════════ SCENE 1: CYBERNETIC HOOK (0s - 2.8s) ══════════ */
+
+  .hook-wrap {
+    text-align: center;
+    display: flex; flex-direction: column; align-items: center;
+    max-width: 1200px;
+  }
+
+  .hook-pill {
+    display: inline-flex; align-items: center; gap: 10px;
+    padding: 7px 20px;
+    background: rgba(0,229,255,0.06);
+    border: 1px solid var(--border-glass);
+    border-radius: 24px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 13px; font-weight: 600;
+    color: var(--cyan);
+    margin-bottom: 36px;
+    box-shadow: 0 0 24px rgba(0,229,255,0.12);
+    opacity: 0;
+    animation: blurSharp 0.5s var(--snap) forwards;
+  }
+
+  .pill-dot {
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    background: var(--cyan);
+    box-shadow: 0 0 8px var(--cyan);
+    position: relative;
+    flex-shrink: 0;
+  }
+  .pill-dot::after {
+    content: '';
+    position: absolute; inset: -1px;
+    border-radius: 50%;
+    background: var(--cyan);
+    animation: ping 1.8s ease-out infinite;
+  }
+
+  .hook-headline {
+    display: flex; flex-direction: column; align-items: center; gap: 0;
+  }
+  .hook-line {
+    display: flex; gap: 18px;
+    font-family: 'Bebas Neue', sans-serif;
+    font-size: 86px;
+    color: #fff;
+    letter-spacing: 3px;
+    line-height: 1.08;
+  }
+  .wmask {
+    display: inline-block;
+    overflow: hidden;
+    vertical-align: bottom;
+    padding-bottom: 4px;
+  }
+  .wtext {
+    display: inline-block;
+    transform: translateY(110%);
+    animation: wordUp 0.55s var(--snap) forwards;
+    text-shadow:
+      0 0 4px rgba(255,255,255,0.85),
+      0 0 20px rgba(0,229,255,0.45),
+      0 0 50px rgba(0,229,255,0.2);
+  }
+
+  .hook-sub {
+    font-size: 24px;
+    color: var(--muted);
+    margin-top: 30px;
+    opacity: 0;
+    animation: fadeUp 0.6s var(--snap) forwards;
+  }
+
+  /* ══════════ SCENE 2: HERO PRODUCT ACTION (2.8s - 10.5s) ══════════ */
+
+  .hero-stage {
+    position: relative;
+    width: 1440px; height: 740px;
+    opacity: 0;
+    animation: heroFly 0.95s var(--snap) forwards;
+  }
+
+  /* 3D Glass Window Frame */
+  .wf {
+    width: 100%; height: 100%;
+    background: var(--s1);
+    border: 1px solid var(--border-glass);
+    border-top: 1px solid rgba(255,255,255,0.15);
+    border-radius: 18px;
+    overflow: hidden;
+    box-shadow:
+      0 2px 4px rgba(0,0,0,0.4),
+      0 20px 40px -4px rgba(0,0,0,0.7),
+      0 40px 90px -10px rgba(0,0,0,0.9),
+      0 0 55px rgba(0,229,255,0.1);
+    display: flex; flex-direction: column;
+    position: relative;
+  }
+  /* Specular sheen sweep */
+  .wf::before {
+    content: '';
+    position: absolute; top: 0; left: -50%;
+    width: 200%; height: 100%;
+    background: linear-gradient(115deg, transparent 0%, rgba(255,255,255,0.02) 40%, rgba(255,255,255,0.06) 50%, transparent 60%);
+    pointer-events: none; z-index: 5;
+  }
+
+  .wf-bar {
+    height: 42px;
+    background: var(--s2);
+    border-bottom: 1px solid var(--border-subtle);
+    display: flex; align-items: center;
+    padding: 0 16px; gap: 8px;
+    flex-shrink: 0;
+  }
+  .wf-dot { width: 12px; height: 12px; border-radius: 50%; }
+  .wf-title {
+    margin-left: 12px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 13px; color: var(--muted);
+  }
+
+  .wf-body {
+    flex: 1; position: relative; overflow: hidden; background: #000;
+  }
+  .wf-body video {
+    width: 100%; height: 100%;
+    object-fit: cover; display: block;
+  }
+
+  /* Floating HUD Badges */
+  .hud {
+    position: absolute;
+    display: flex; align-items: center; gap: 10px;
+    padding: 14px 22px;
+    background: rgba(5,5,14,0.92);
+    backdrop-filter: blur(16px) saturate(180%);
+    border-radius: 14px;
+    font-family: 'DM Sans', sans-serif;
+    font-size: 14px; font-weight: 700;
+    opacity: 0; z-index: 20;
+    animation: badgePop 0.55s var(--elastic) forwards;
+  }
+  .hud::before {
+    content: '';
+    position: absolute; top: 0; left: -50%; width: 200%; height: 100%;
+    background: linear-gradient(115deg, transparent 25%, rgba(255,255,255,0.04) 50%, transparent 75%);
+    pointer-events: none; border-radius: 14px;
+  }
+
+  .hud-safe {
+    top: 50px; right: 30px;
+    border: 1px solid rgba(0,255,163,0.4);
+    border-top: 1px solid rgba(0,255,163,0.55);
+    color: var(--green);
+    box-shadow: 0 12px 32px rgba(0,0,0,0.65), 0 0 30px rgba(0,255,163,0.2);
+  }
+  .hud-exec {
+    bottom: 50px; left: 30px;
+    border: 1px solid rgba(0,229,255,0.4);
+    border-top: 1px solid rgba(0,229,255,0.55);
+    color: var(--cyan);
+    box-shadow: 0 12px 32px rgba(0,0,0,0.65), 0 0 30px rgba(0,229,255,0.2);
+  }
+
+  .hud-dot {
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    position: relative; flex-shrink: 0;
+  }
+  .hud-safe .hud-dot { background: var(--green); box-shadow: 0 0 6px var(--green); }
+  .hud-exec .hud-dot { background: var(--cyan); box-shadow: 0 0 6px var(--cyan); }
+  .hud-dot::after {
+    content: '';
+    position: absolute; inset: -1px;
+    border-radius: 50%;
+    animation: ping 2s ease-out infinite;
+  }
+  .hud-safe .hud-dot::after { background: var(--green); }
+  .hud-exec .hud-dot::after { background: var(--cyan); }
+
+  /* ══════════ SCENE 3: CAPABILITY CASCADE (10.5s - 14.7s) ══════════ */
+
+  .cascade-wrap {
+    width: 1200px;
+    display: flex; flex-direction: column; align-items: center; gap: 28px;
+  }
+  .cascade-title {
+    font-family: 'Bebas Neue', sans-serif;
+    font-size: 56px; letter-spacing: 3px; color: #fff;
+    text-shadow:
+      0 0 4px rgba(255,255,255,0.6),
+      0 0 20px rgba(0,229,255,0.3);
+    opacity: 0;
+    animation: blurSharp 0.5s var(--snap) forwards;
+  }
+
+  .cascade-grid {
+    display: grid; grid-template-columns: repeat(3, 1fr);
+    gap: 24px; width: 100%;
+  }
+
+  .fcard {
+    background: rgba(7,7,18,0.88);
+    backdrop-filter: blur(20px) saturate(180%);
+    border: 1px solid var(--border-glass);
+    border-top: 1px solid rgba(255,255,255,0.12);
+    border-radius: 16px;
+    padding: 32px 28px;
+    display: flex; flex-direction: column; gap: 14px;
+    box-shadow:
+      0 2px 4px rgba(0,0,0,0.3),
+      0 16px 32px -4px rgba(0,0,0,0.6),
+      0 36px 72px -10px rgba(0,0,0,0.85);
+    position: relative; overflow: hidden;
+    clip-path: inset(100% 0 0 0 round 16px);
+    opacity: 0;
+    animation: curtain 0.6s var(--snap) forwards;
+  }
+  /* Gradient top accent */
+  .fcard::before {
+    content: '';
+    position: absolute; top: 0; left: 0; right: 0; height: 3px;
+    background: linear-gradient(90deg, var(--cyan), var(--green));
+  }
+  /* Specular sheen */
+  .fcard::after {
+    content: '';
+    position: absolute; top: 0; left: -50%; width: 200%; height: 100%;
+    background: linear-gradient(115deg, transparent 30%, rgba(255,255,255,0.025) 48%, rgba(255,255,255,0.05) 52%, transparent 70%);
+    pointer-events: none;
+  }
+
+  .fcard-icon {
+    width: 52px; height: 52px;
+    background: var(--s2);
+    border: 1px solid var(--border-subtle);
+    border-radius: 12px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 24px;
+  }
+  .fcard-name { font-size: 20px; font-weight: 700; color: #fff; }
+  .fcard-desc { font-size: 14px; color: var(--muted); line-height: 1.55; }
+
+  .stat-bar {
+    width: 100%;
+    background: rgba(12,12,30,0.9);
+    backdrop-filter: blur(12px);
+    border: 1px solid var(--border-subtle);
+    border-top: 1px solid rgba(255,255,255,0.08);
+    border-radius: 12px;
+    padding: 16px 28px;
+    display: flex; align-items: center; justify-content: space-around;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 13px; color: var(--muted);
+    opacity: 0;
+    animation: blurSharp 0.45s var(--snap) forwards;
+  }
+  .stat-bar .v { color: var(--cyan); font-weight: 600; }
+
+  /* ══════════ SCENE 4: BRAND CLIMAX & OUTRO (14.7s - 20s) ══════════ */
+
+  .outro-wrap {
+    text-align: center;
+    display: flex; flex-direction: column; align-items: center;
+  }
+
+  .outro-icon {
+    width: 100px; height: 100px;
+    background: linear-gradient(135deg, var(--cyan), #0090ff);
+    border-radius: 24px;
+    display: flex; align-items: center; justify-content: center;
+    margin-bottom: 28px;
+    box-shadow:
+      0 0 60px rgba(0,229,255,0.55),
+      0 0 120px rgba(0,229,255,0.2);
+    opacity: 0;
+    animation: logoSlam 0.75s var(--elastic) forwards;
+  }
+
+  .outro-brand {
+    font-family: 'Bebas Neue', sans-serif;
+    font-size: 110px; color: #fff;
+    letter-spacing: 10px;
+    text-shadow:
+      0 0 4px rgba(255,255,255,0.9),
+      0 0 20px rgba(0,229,255,0.5),
+      0 0 60px rgba(0,229,255,0.25),
+      0 0 100px rgba(0,229,255,0.12);
+    opacity: 0;
+    animation: blurSharp 0.55s var(--snap) forwards;
+  }
+
+  .outro-tag {
+    font-size: 28px; color: var(--muted);
+    margin-top: 16px;
+    opacity: 0;
+    animation: fadeUp 0.5s var(--snap) forwards;
+  }
+
+  .outro-cta {
+    margin-top: 34px;
+    display: inline-flex; align-items: center; gap: 10px;
+    padding: 11px 26px;
+    background: rgba(0,255,163,0.08);
+    border: 1px solid rgba(0,255,163,0.35);
+    border-top: 1px solid rgba(0,255,163,0.5);
+    border-radius: 24px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 14px; font-weight: 600;
+    color: var(--green);
+    box-shadow: 0 0 28px rgba(0,255,163,0.15);
+    opacity: 0;
+    animation: fadeUp 0.5s var(--snap) forwards;
+  }
+</style>
+
+<script>
+  window.__timelines = window.__timelines || {};
+  window.__timelines["nexus-brag"] = { id: "nexus-brag", duration: 20, fps: 30 };
+</script>
+</head>
+
+<body
+  class="clip"
+  data-composition-id="nexus-brag"
+  data-start="0"
+  data-duration="20"
+  data-fps="30"
+  data-width="1920"
+  data-height="1080"
+>
+
+<!-- ════ AUDIO MIX ════════════════════════════════════════════════ -->
+<audio id="music"    data-start="0"    data-duration="20"  data-track-index="10" data-volume="0.35" src="assets/music/happy-beats-business-moves-vol-1-by-ende-dot-app.mp3"></audio>
+<audio id="sfx-enter" data-start="2.8"  data-duration="0.8" data-track-index="11" data-volume="0.70" src="assets/sfx/interface/drop_001.ogg"></audio>
+<audio id="sfx-safe"  data-start="5.3"  data-duration="0.5" data-track-index="12" data-volume="0.55" src="assets/sfx/interface/click_001.ogg"></audio>
+<audio id="sfx-exec"  data-start="7.8"  data-duration="0.8" data-track-index="13" data-volume="0.60" src="assets/sfx/interface/drop_002.ogg"></audio>
+<audio id="sfx-c1"    data-start="10.8" data-duration="0.8" data-track-index="14" data-volume="0.65" src="assets/sfx/interface/drop_001.ogg"></audio>
+<audio id="sfx-c2"    data-start="11.1" data-duration="0.5" data-track-index="15" data-volume="0.55" src="assets/sfx/interface/click_001.ogg"></audio>
+<audio id="sfx-c3"    data-start="11.4" data-duration="0.8" data-track-index="16" data-volume="0.65" src="assets/sfx/interface/drop_002.ogg"></audio>
+<audio id="sfx-slam"  data-start="14.7" data-duration="1.5" data-track-index="17" data-volume="0.80" src="assets/sfx/impact/impactBell_heavy_000.ogg"></audio>
+
+<!-- ════ AMBIENT CANVAS ════════════════════════════════════════════ -->
+<div class="ambient clip" id="ambient" data-start="0" data-duration="20"></div>
+
+<!-- ════ SCENE 1: CYBERNETIC HOOK (0s – 2.8s) ════════════════════ -->
+<div class="scene clip" id="s1" data-start="0" data-duration="2.8">
+  <div class="hook-wrap" id="hook-wrap">
+
+    <div class="hook-pill" id="hook-pill" style="animation-delay: 0.15s;">
+      <span class="pill-dot"></span>
+      <span>100% LOCAL EXECUTION • ZERO CLOUD LOCK-IN</span>
+    </div>
+
+    <div class="hook-headline" id="hook-headline">
+      <div class="hook-line">
+        <span class="wmask"><span class="wtext" style="animation-delay: 0.35s;">YOUR</span></span>
+        <span class="wmask"><span class="wtext" style="animation-delay: 0.45s;">COMPUTER.</span></span>
+      </div>
+      <div class="hook-line">
+        <span class="wmask"><span class="wtext" style="animation-delay: 0.65s;">FULLY</span></span>
+        <span class="wmask"><span class="wtext" style="animation-delay: 0.75s;">AUTOMATED.</span></span>
+      </div>
+    </div>
+
+    <div class="hook-sub" id="hook-sub" style="animation-delay: 1.6s;">
+      Meet NEXUS — The autonomous local AI task execution engine.
+    </div>
+
+  </div>
+</div>
+
+<!-- ════ SCENE 2: HERO PRODUCT ACTION (2.8s – 10.5s) ═════════════ -->
+<div class="scene clip" id="s2" data-start="2.8" data-duration="7.7">
+  <div class="hero-stage" id="hero-stage" style="animation-delay: 2.8s;">
+
+    <!-- Floating HUD: Safety Gate -->
+    <div class="hud hud-safe" id="hud-safe" style="animation-delay: 5.3s;">
+      <span class="hud-dot"></span>
+      <span>🛡️ AI SAFETY GATE — 98% CONFIDENCE</span>
+    </div>
+
+    <!-- Floating HUD: Execution -->
+    <div class="hud hud-exec" id="hud-exec" style="animation-delay: 7.8s;">
+      <span class="hud-dot"></span>
+      <span>⚡ PLAYWRIGHT AUTOMATION • 9.7s</span>
+    </div>
+
+    <!-- 3D Glass Window -->
+    <div class="wf" id="wf">
+      <div class="wf-bar">
+        <div class="wf-dot" style="background: #ff5f56;"></div>
+        <div class="wf-dot" style="background: #ffbd2e;"></div>
+        <div class="wf-dot" style="background: #27c93f;"></div>
+        <span class="wf-title">NEXUS AI Command Center — localhost:3000</span>
+      </div>
+      <div class="wf-body">
+        <video id="demo-vid" data-start="2.8" data-duration="7.7" data-media-start="1" autoplay loop muted playsinline src="assets/videos/nexus-demo.mp4"></video>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- ════ SCENE 3: CAPABILITY CASCADE (10.5s – 14.7s) ═════════════ -->
+<div class="scene clip" id="s3" data-start="10.5" data-duration="4.2">
+  <div class="cascade-wrap" id="cascade-wrap">
+
+    <div class="cascade-title" id="cascade-title" style="animation-delay: 10.5s;">
+      AUTONOMOUS CAPABILITIES
+    </div>
+
+    <div class="cascade-grid" id="cascade-grid">
+      <div class="fcard" id="fc1" style="animation-delay: 10.8s;">
+        <div class="fcard-icon">🌐</div>
+        <div class="fcard-name">Web Scraping & Research</div>
+        <div class="fcard-desc">Playwright-driven browser automation. Extracts search results, navigates pages, and gathers intel autonomously.</div>
+      </div>
+
+      <div class="fcard" id="fc2" style="animation-delay: 11.1s;">
+        <div class="fcard-icon">📄</div>
+        <div class="fcard-name">Excel & Document Synthesis</div>
+        <div class="fcard-desc">Generates formatted Excel workbooks, Word documents, and React UI components via Python scripting.</div>
+      </div>
+
+      <div class="fcard" id="fc3" style="animation-delay: 11.4s;">
+        <div class="fcard-icon">💬</div>
+        <div class="fcard-name">Desktop & App Automation</div>
+        <div class="fcard-desc">Controls Windows apps, WhatsApp, Spotify, and system tasks — all through plain English commands.</div>
+      </div>
+    </div>
+
+    <div class="stat-bar" id="stat-bar" style="animation-delay: 12.2s;">
+      <span>ENGINE: <span class="v">Groq Llama-3.3-70B</span></span>
+      <span>PROTOCOL: <span class="v">WebSocket Dual-Feed</span></span>
+      <span>SAFETY: <span class="v">Local Review Gate</span></span>
+    </div>
+
+  </div>
+</div>
+
+<!-- ════ SCENE 4: BRAND CLIMAX & LOGO SLAM (14.7s – 20.0s) ═══════ -->
+<div class="scene clip" id="s4" data-start="14.7" data-duration="5.3">
+  <div class="outro-wrap" id="outro-wrap">
+
+    <div class="outro-icon" id="outro-icon" style="animation-delay: 14.7s;">
+      <svg width="50" height="50" viewBox="0 0 18 18" fill="none">
+        <path d="M9 1L16 5V13L9 17L2 13V5L9 1Z" stroke="#fff" stroke-width="1.5" fill="none"/>
+        <circle cx="9" cy="9" r="2.5" fill="#fff"/>
+      </svg>
+    </div>
+
+    <div class="outro-brand" id="outro-brand" style="animation-delay: 15.1s;">NEXUS</div>
+
+    <div class="outro-tag" id="outro-tag" style="animation-delay: 15.6s;">
+      You describe it. Nexus does it.
+    </div>
+
+    <div class="outro-cta" id="outro-cta" style="animation-delay: 16.2s;">
+      <span>★</span> OPEN SOURCE ON GITHUB
+    </div>
+
+  </div>
+</div>
+
+</body>
+</html>

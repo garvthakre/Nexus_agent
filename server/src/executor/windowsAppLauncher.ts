@@ -30,6 +30,7 @@ export interface StepResult {
   success: boolean;
   message?: string;
   warning?: string;
+  [key: string]: unknown;
 }
 
 interface AppEntry {

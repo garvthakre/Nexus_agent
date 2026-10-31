@@ -281,3 +281,18 @@ export interface UserWebhookConfig {
   createdAt: string
   updatedAt: string
 }
+
+export interface ScheduleRecord {
+  id: string;
+  userId: string;
+  name: string;
+  prompt: string;
+  cronExpression: string;
+  enabled: boolean;
+  lastRunAt: string | null;
+  nextRunAt: string | null;
+  lastStatus: string | null;
+  lastSessionId: string | null;
+  createdAt: string;
+  updatedAt: string;
+}

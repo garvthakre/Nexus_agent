@@ -1,0 +1,425 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Paytm Merchant & Customer Support Ops Console</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+    body { background: #f4f6f9; color: #1e293b; padding: 20px; }
+    header { background: #002970; color: #fff; padding: 16px 24px; border-radius: 8px; margin-bottom: 20px; display: flex; justify-content: space-between; align-items: center; }
+    header h1 { font-size: 20px; font-weight: 700; letter-spacing: 0.5px; }
+    .badge { display: inline-block; padding: 4px 10px; border-radius: 12px; font-size: 12px; font-weight: 600; }
+    .badge-success { background: #dcfce7; color: #166534; }
+    .badge-failed { background: #fee2e2; color: #991b1b; }
+    .badge-pending { background: #fef3c7; color: #92400e; }
+    .badge-review { background: #e0e7ff; color: #3730a3; }
+    .nav-tabs { display: flex; gap: 8px; margin-bottom: 16px; border-bottom: 2px solid #e2e8f0; padding-bottom: 8px; }
+    .tab-btn { padding: 10px 18px; border: none; background: #fff; border-radius: 6px; cursor: pointer; font-weight: 600; color: #64748b; transition: all 0.2s; }
+    .tab-btn.active { background: #00b9f1; color: #fff; }
+    .panel { background: #fff; border-radius: 8px; padding: 20px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); display: none; }
+    .panel.active { display: block; }
+    .search-bar { display: flex; gap: 10px; margin-bottom: 20px; }
+    .search-input { flex: 1; padding: 10px 14px; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 14px; }
+    .btn { padding: 10px 18px; border: none; border-radius: 6px; font-weight: 600; cursor: pointer; font-size: 14px; transition: background 0.15s; }
+    .btn-primary { background: #002970; color: #fff; }
+    .btn-primary:hover { background: #001a47; }
+    .btn-action { background: #00b9f1; color: #fff; padding: 6px 12px; font-size: 13px; }
+    .btn-danger { background: #ef4444; color: #fff; padding: 6px 12px; font-size: 13px; }
+    .btn-success { background: #10b981; color: #fff; padding: 6px 12px; font-size: 13px; }
+    table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 14px; }
+    th { text-align: left; padding: 12px 14px; background: #f8fafc; border-bottom: 2px solid #e2e8f0; color: #475569; }
+    td { padding: 12px 14px; border-bottom: 1px solid #e2e8f0; vertical-align: middle; }
+    tr:hover { background: #f8fafc; }
+    .status-box { margin-top: 15px; padding: 12px 16px; border-radius: 6px; background: #f1f5f9; border-left: 4px solid #00b9f1; font-weight: 500; font-size: 14px; }
+    .audit-log { font-family: monospace; font-size: 12px; color: #475569; background: #f8fafc; padding: 10px; border-radius: 6px; margin-top: 10px; max-height: 120px; overflow-y: auto; }
+  </style>
+</head>
+<body>
+  <header>
+    <div>
+      <h1>Paytm Ops Console — Support & Escalations</h1>
+      <p style="font-size: 12px; color: #93c5fd; margin-top: 4px;">Track 3: Autonomous AI Teammates Benchmark Environment</p>
+    </div>
+    <div>
+      <span class="badge badge-success">Console Active: Node-301</span>
+    </div>
+  </header>
+
+  <div class="nav-tabs">
+    <button class="tab-btn active" id="tab-disputes" onclick="switchTab('disputes')">1. Payment Disputes</button>
+    <button class="tab-btn" id="tab-refunds" onclick="switchTab('refunds')">2. Refund Requests</button>
+    <button class="tab-btn" id="tab-settlements" onclick="switchTab('settlements')">3. Settlement Status</button>
+    <button class="tab-btn" id="tab-duplicates" onclick="switchTab('duplicates')">4. Duplicate Charges</button>
+    <button class="tab-btn" id="tab-kyc" onclick="switchTab('kyc')">5. KYC Verification</button>
+  </div>
+
+  <!-- TAB 1: PAYMENT DISPUTES -->
+  <div class="panel active" id="panel-disputes">
+    <h2>Failed Payment Disputes</h2>
+    <div class="search-bar" style="margin-top: 15px;">
+      <input type="text" class="search-input" id="dispute-search-input" placeholder="Search by Transaction ID (e.g., TXN_9011)...">
+      <button class="btn btn-primary" id="btn-search-dispute" onclick="searchDispute()">Search Transaction</button>
+    </div>
+    <table>
+      <thead>
+        <tr>
+          <th>Txn ID</th>
+          <th>Customer</th>
+          <th>Amount</th>
+          <th>Gateway</th>
+          <th>Status</th>
+          <th>Reason</th>
+          <th>Action</th>
+        </tr>
+      </thead>
+      <tbody id="dispute-tbody">
+        <tr id="row-txn-9011">
+          <td><strong>TXN_9011</strong></td>
+          <td>Rohan Sharma</td>
+          <td>₹1,499.00</td>
+          <td>Paytm UPI</td>
+          <td><span class="badge badge-failed" id="status-txn-9011">Failed</span></td>
+          <td>Bank debit without merchant credit</td>
+          <td><button class="btn btn-action" id="btn-dispute-9011" onclick="handleDispute('TXN_9011', 'Dispute Raised for Bank Reconciliation')">Raise Dispute</button></td>
+        </tr>
+        <tr id="row-txn-9012">
+          <td><strong>TXN_9012</strong></td>
+          <td>Priya Patel</td>
+          <td>₹8,200.00</td>
+          <td>HDFC NetBanking</td>
+          <td><span class="badge badge-failed" id="status-txn-9012">Failed</span></td>
+          <td>Gateway Session Timeout</td>
+          <td><button class="btn btn-action" id="btn-dispute-9012" onclick="handleDispute('TXN_9012', 'Escalated to Merchant Gateway Desk')">Escalate to Gateway</button></td>
+        </tr>
+        <tr id="row-txn-9014">
+          <td><strong>TXN_9014</strong></td>
+          <td>Amit Verma</td>
+          <td>₹2,450.00</td>
+          <td>Paytm Wallet</td>
+          <td><span class="badge badge-failed" id="status-txn-9014">Failed</span></td>
+          <td>Error U16: NPCI Timeout</td>
+          <td><button class="btn btn-action" id="btn-dispute-9014" onclick="handleDispute('TXN_9014', 'Investigating NPCI U16 Error')">Investigate NPCI</button></td>
+        </tr>
+        <tr id="row-txn-9015">
+          <td><strong>TXN_9015</strong></td>
+          <td>Sneha Reddy</td>
+          <td>₹4,120.00</td>
+          <td>SBI Debit Card</td>
+          <td><span class="badge badge-pending" id="status-txn-9015">Under Review</span></td>
+          <td>Disputed duplicate auth hold</td>
+          <td><button class="btn btn-action" id="btn-dispute-9015" onclick="handleDispute('TXN_9015', 'Bank Debit Ref Verified: REF-SBI-88192')">Verify Bank Ref</button></td>
+        </tr>
+      </tbody>
+    </table>
+    <div class="status-box" id="dispute-status-msg">Ready for dispute operations.</div>
+  </div>
+
+  <!-- TAB 2: REFUND REQUESTS -->
+  <div class="panel" id="panel-refunds">
+    <h2>Refund Operations</h2>
+    <div class="search-bar" style="margin-top: 15px;">
+      <input type="text" class="search-input" id="refund-search-input" placeholder="Search Order ID (e.g. ORD_4101)...">
+      <button class="btn btn-primary" id="btn-search-refund" onclick="searchRefund()">Search Order</button>
+    </div>
+    <table>
+      <thead>
+        <tr>
+          <th>Order ID</th>
+          <th>Customer</th>
+          <th>Amount</th>
+          <th>Category</th>
+          <th>Refund Status</th>
+          <th>Action</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr id="row-ord-4101">
+          <td><strong>ORD_4101</strong></td>
+          <td>Sneha Gupta</td>
+          <td>₹3,500.00</td>
+          <td>Electronics (Damaged)</td>
+          <td><span class="badge badge-pending" id="status-ord-4101">Requested</span></td>
+          <td><button class="btn btn-success" id="btn-refund-4101" onclick="handleRefund('ORD_4101', true, 'Full Refund Initiated to Source Account')">Process Full Refund</button></td>
+        </tr>
+        <tr id="row-ord-4102">
+          <td><strong>ORD_4102</strong></td>
+          <td>Vikram Singh</td>
+          <td>₹1,120.00</td>
+          <td>Groceries (Missing items)</td>
+          <td><span class="badge badge-pending" id="status-ord-4102">Requested</span></td>
+          <td><button class="btn btn-success" id="btn-refund-4102" onclick="handleRefund('ORD_4102', true, 'Refund Request Validated and Approved')">Check & Submit Refund</button></td>
+        </tr>
+        <tr id="row-ord-4103">
+          <td><strong>ORD_4103</strong></td>
+          <td>Ananya Roy</td>
+          <td>₹4,890.00</td>
+          <td>Fashion Apparel</td>
+          <td><span class="badge badge-review" id="status-ord-4103">Pending Approval</span></td>
+          <td><button class="btn btn-success" id="btn-refund-4103" onclick="handleRefund('ORD_4103', true, 'Manager Authorization Granted - Refund Queued')">Authorize Refund</button></td>
+        </tr>
+        <tr id="row-ord-4104">
+          <td><strong>ORD_4104</strong></td>
+          <td>Deepak Joshi</td>
+          <td>₹750.00</td>
+          <td>Food Delivery (Delivered on time)</td>
+          <td><span class="badge badge-review" id="status-ord-4104">In Review</span></td>
+          <td><button class="btn btn-danger" id="btn-refund-4104" onclick="handleRefund('ORD_4104', false, 'Claim Rejected: Exceeded 24h Policy Window')">Reject Refund Claim</button></td>
+        </tr>
+      </tbody>
+    </table>
+    <div class="status-box" id="refund-status-msg">Ready for refund processing.</div>
+  </div>
+
+  <!-- TAB 3: SETTLEMENT STATUS -->
+  <div class="panel" id="panel-settlements">
+    <h2>Merchant Settlements</h2>
+    <div class="search-bar" style="margin-top: 15px;">
+      <input type="text" class="search-input" id="settlement-search-input" placeholder="Search Merchant ID (e.g. MID_501)...">
+      <button class="btn btn-primary" id="btn-search-settlement" onclick="searchSettlement()">Lookup Settlement</button>
+    </div>
+    <table>
+      <thead>
+        <tr>
+          <th>Merchant ID</th>
+          <th>Store Name</th>
+          <th>Batch #</th>
+          <th>Amount</th>
+          <th>Status</th>
+          <th>UTR Reference</th>
+          <th>Action</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr id="row-mid-501">
+          <td><strong>MID_501</strong></td>
+          <td>FreshMart Bangalore</td>
+          <td>SETTLE_B8820</td>
+          <td>₹45,200.00</td>
+          <td><span class="badge badge-success" id="status-mid-501">Processed</span></td>
+          <td>UTR-PAYTM-992104</td>
+          <td><button class="btn btn-action" id="btn-settle-501" onclick="handleSettlement('MID_501', 'Settlement Verified: UTR-PAYTM-992104 confirmed credited')">Verify UTR</button></td>
+        </tr>
+        <tr id="row-mid-502">
+          <td><strong>MID_502</strong></td>
+          <td>Spice Hub Delhi</td>
+          <td>SETTLE_B8821</td>
+          <td>₹18,400.00</td>
+          <td><span class="badge badge-failed" id="status-mid-502">Delayed</span></td>
+          <td>Pending Gateway Clearing</td>
+          <td><button class="btn btn-action" id="btn-settle-502" onclick="handleSettlement('MID_502', 'Re-triggered NEFT payout batch for MID_502')">Re-trigger Transfer</button></td>
+        </tr>
+        <tr id="row-mid-503">
+          <td><strong>MID_503</strong></td>
+          <td>Chai Point Mumbai</td>
+          <td>SETTLE_B8822</td>
+          <td>₹9,150.00</td>
+          <td><span class="badge badge-review" id="status-mid-503">Reconciliation Pending</span></td>
+          <td>Hold for Weekend Batch</td>
+          <td><button class="btn btn-action" id="btn-settle-503" onclick="handleSettlement('MID_503', 'Reconciliation Checked: Balance ₹9,150 matches POS ledger')">Reconcile Ledger</button></td>
+        </tr>
+      </tbody>
+    </table>
+    <div class="status-box" id="settlement-status-msg">Ready for merchant settlement audit.</div>
+  </div>
+
+  <!-- TAB 4: DUPLICATE CHARGES -->
+  <div class="panel" id="panel-duplicates">
+    <h2>Duplicate Debit Resolutions</h2>
+    <div class="search-bar" style="margin-top: 15px;">
+      <input type="text" class="search-input" id="duplicate-search-input" placeholder="Search by Phone (e.g. 9876543210) or Case (DUP_801)...">
+      <button class="btn btn-primary" id="btn-search-duplicate" onclick="searchDuplicate()">Search Case</button>
+    </div>
+    <table>
+      <thead>
+        <tr>
+          <th>Case ID</th>
+          <th>Customer Phone</th>
+          <th>Txn 1 & 2</th>
+          <th>Debit Amount</th>
+          <th>Time Interval</th>
+          <th>Status</th>
+          <th>Resolution Action</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr id="row-dup-801">
+          <td><strong>DUP_801</strong></td>
+          <td>9876543210 (Karan Malhotra)</td>
+          <td>TXN_8811 / TXN_8812</td>
+          <td>2x ₹1,200.00</td>
+          <td>12 seconds</td>
+          <td><span class="badge badge-pending" id="status-dup-801">Open</span></td>
+          <td><button class="btn btn-success" id="btn-dup-801" onclick="handleDuplicate('DUP_801', true, 'Duplicate Confirmed: TXN_8812 Reversal Queued')">Confirm & Reverse Duplicate</button></td>
+        </tr>
+        <tr id="row-dup-802">
+          <td><strong>DUP_802</strong></td>
+          <td>9876543211 (Meera Iyer)</td>
+          <td>TXN_8830 / TXN_8831</td>
+          <td>2x ₹550.00</td>
+          <td>4 seconds</td>
+          <td><span class="badge badge-pending" id="status-dup-802">Open</span></td>
+          <td><button class="btn btn-success" id="btn-dup-802" onclick="handleDuplicate('DUP_802', true, 'Duplicate Confirmed: ₹550 Instant Refund Initiated')">Reverse Second Charge</button></td>
+        </tr>
+        <tr id="row-dup-803">
+          <td><strong>DUP_803</strong></td>
+          <td>9876543212 (Rajesh Nair)</td>
+          <td>TXN_8845 / TXN_8846</td>
+          <td>₹3,200 + ₹3,200</td>
+          <td>48 minutes</td>
+          <td><span class="badge badge-review" id="status-dup-803">Under Review</span></td>
+          <td><button class="btn btn-danger" id="btn-dup-803" onclick="handleDuplicate('DUP_803', false, 'Case Dismissed: Two Separate Verified Merchant Orders')">Dismiss as Valid Purchases</button></td>
+        </tr>
+      </tbody>
+    </table>
+    <div class="status-box" id="duplicate-status-msg">Ready for duplicate charge resolution.</div>
+  </div>
+
+  <!-- TAB 5: KYC VERIFICATION -->
+  <div class="panel" id="panel-kyc">
+    <h2>KYC Status & Onboarding Lookup</h2>
+    <div class="search-bar" style="margin-top: 15px;">
+      <input type="text" class="search-input" id="kyc-search-input" placeholder="Search Customer ID (e.g. USR_701) or PAN...">
+      <button class="btn btn-primary" id="btn-search-kyc" onclick="searchKyc()">Search KYC</button>
+    </div>
+    <table>
+      <thead>
+        <tr>
+          <th>User ID</th>
+          <th>Customer Name</th>
+          <th>PAN Number</th>
+          <th>KYC Tier</th>
+          <th>Status</th>
+          <th>Action</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr id="row-usr-701">
+          <td><strong>USR_701</strong></td>
+          <td>Sunil Kumar</td>
+          <td>ABCDE1234F</td>
+          <td>Full KYC (Annual)</td>
+          <td><span class="badge badge-success" id="status-usr-701">Approved</span></td>
+          <td><button class="btn btn-action" id="btn-kyc-701" onclick="handleKyc('USR_701', 'PAN and Aadhaar verified on 2026-10-15')">Lookup Details</button></td>
+        </tr>
+        <tr id="row-usr-702">
+          <td><strong>USR_702</strong></td>
+          <td>Neha Deshmukh</td>
+          <td>FGHIJ5678K</td>
+          <td>Video KYC</td>
+          <td><span class="badge badge-pending" id="status-usr-702">V-KYC Pending</span></td>
+          <td><button class="btn btn-action" id="btn-kyc-702" onclick="handleKyc('USR_702', 'V-KYC Link Sent via SMS to 9820011223')">Re-trigger V-KYC Link</button></td>
+        </tr>
+        <tr id="row-usr-703">
+          <td><strong>USR_703</strong></td>
+          <td>Arjun Rao</td>
+          <td>KLMNO9012P</td>
+          <td>Min KYC</td>
+          <td><span class="badge badge-failed" id="status-usr-703">Rejected</span></td>
+          <td><button class="btn btn-action" id="btn-kyc-703" onclick="handleKyc('USR_703', 'Document Re-upload Notification Sent: PAN Image Blurry')">Request Re-upload</button></td>
+        </tr>
+        <tr id="row-usr-704">
+          <td><strong>USR_704</strong></td>
+          <td>Pooja Hegde</td>
+          <td>PQRST3456Q</td>
+          <td>Merchant KYC</td>
+          <td><span class="badge badge-review" id="status-usr-704">Document Review</span></td>
+          <td><button class="btn btn-success" id="btn-kyc-704" onclick="handleKyc('USR_704', 'Merchant Tier 2 Limit Upgraded to ₹2,00,000/day')">Approve Limit Upgrade</button></td>
+        </tr>
+      </tbody>
+    </table>
+    <div class="status-box" id="kyc-status-msg">Ready for KYC lookup.</div>
+  </div>
+
+  <div class="audit-log" id="audit-log">
+    [SYSTEM READY] Mock Fintech Ops Dashboard loaded. Listening for automation events.
+  </div>
+
+  <script>
+    function logEvent(msg) {
+      const el = document.getElementById('audit-log');
+      const time = new Date().toISOString().substring(11, 19);
+      el.innerHTML = `[${time}] ${msg}<br>` + el.innerHTML;
+    }
+
+    function switchTab(tabId) {
+      document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+      document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+      const btn = document.getElementById('tab-' + tabId);
+      const panel = document.getElementById('panel-' + tabId);
+      if (btn) btn.classList.add('active');
+      if (panel) panel.classList.add('active');
+      logEvent(`Switched to tab: ${tabId}`);
+    }
+
+    function searchDispute() {
+      const val = document.getElementById('dispute-search-input').value.trim();
+      document.getElementById('dispute-status-msg').innerText = `Searched: ${val}. Result: Found transaction record.`;
+      logEvent(`Searched Dispute: ${val}`);
+    }
+
+    function handleDispute(id, resultMsg) {
+      const badge = document.getElementById('status-txn-' + id.toLowerCase().replace('_', '-'));
+      if (badge) {
+        badge.className = 'badge badge-success';
+        badge.innerText = 'Dispute Logged';
+      }
+      document.getElementById('dispute-status-msg').innerText = `[SUCCESS] Transaction ${id}: ${resultMsg}`;
+      logEvent(`Dispute Action on ${id}: ${resultMsg}`);
+    }
+
+    function searchRefund() {
+      const val = document.getElementById('refund-search-input').value.trim();
+      document.getElementById('refund-status-msg').innerText = `Searched Order: ${val}. Order details retrieved.`;
+      logEvent(`Searched Refund: ${val}`);
+    }
+
+    function handleRefund(orderId, isApproved, msg) {
+      const badge = document.getElementById('status-ord-' + orderId.toLowerCase().replace('_', '-'));
+      if (badge) {
+        badge.className = isApproved ? 'badge badge-success' : 'badge badge-failed';
+        badge.innerText = isApproved ? 'Refund Processed' : 'Refund Rejected';
+      }
+      document.getElementById('refund-status-msg').innerText = `[PROCESSED] Order ${orderId}: ${msg}`;
+      logEvent(`Refund Action on ${orderId}: ${msg}`);
+    }
+
+    function searchSettlement() {
+      const val = document.getElementById('settlement-search-input').value.trim();
+      document.getElementById('settlement-status-msg').innerText = `Lookup Merchant: ${val}. Settlement batch ledger retrieved.`;
+      logEvent(`Searched Settlement: ${val}`);
+    }
+
+    function handleSettlement(mid, msg) {
+      document.getElementById('settlement-status-msg').innerText = `[VERIFIED] Merchant ${mid}: ${msg}`;
+      logEvent(`Settlement Action on ${mid}: ${msg}`);
+    }
+
+    function searchDuplicate() {
+      const val = document.getElementById('duplicate-search-input').value.trim();
+      document.getElementById('duplicate-status-msg').innerText = `Duplicate Case ${val}: Matched transaction logs found.`;
+      logEvent(`Searched Duplicate: ${val}`);
+    }
+
+    function handleDuplicate(caseId, isReversed, msg) {
+      const badge = document.getElementById('status-dup-' + caseId.toLowerCase().replace('_', '-'));
+      if (badge) {
+        badge.className = isReversed ? 'badge badge-success' : 'badge badge-review';
+        badge.innerText = isReversed ? 'Reversal Complete' : 'Dismissed';
+      }
+      document.getElementById('duplicate-status-msg').innerText = `[RESOLVED] ${caseId}: ${msg}`;
+      logEvent(`Duplicate Resolution on ${caseId}: ${msg}`);
+    }
+
+    function searchKyc() {
+      const val = document.getElementById('kyc-search-input').value.trim();
+      document.getElementById('kyc-status-msg').innerText = `KYC Database Result for ${val}: Profile retrieved.`;
+      logEvent(`Searched KYC: ${val}`);
+    }
+
+    function handleKyc(userId, msg) {
+      document.getElementById('kyc-status-msg').innerText = `[UPDATED] ${userId}: ${msg}`;
+      logEvent(`KYC Action on ${userId}: ${msg}`);
+    }
+  </script>
+</body>
+</html>

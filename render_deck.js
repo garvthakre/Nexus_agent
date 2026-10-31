@@ -1,0 +1,762 @@
+const fs = require('fs');
+const path = require('path');
+const { chromium } = require('./server/node_modules/playwright');
+
+// Build an HTML file with all 7 slides styled identically to the presentation
+const htmlContent = `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Nexus Teammate Pitch Deck</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background-color: #050E1A;
+    font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, Roboto, sans-serif;
+    color: #F8FAFC;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 40px;
+    padding: 20px;
+  }
+  .slide {
+    width: 1920px;
+    height: 1080px;
+    background-color: #0A1B33;
+    position: relative;
+    overflow: hidden;
+    padding: 65px 115px;
+    box-shadow: 0 20px 50px rgba(0,0,0,0.6);
+  }
+  .tag {
+    font-size: 16px;
+    font-weight: 700;
+    color: #00BAF2;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    margin-bottom: 8px;
+  }
+  .headline {
+    font-size: 38px;
+    font-weight: 700;
+    color: #F8FAFC;
+    margin-bottom: 35px;
+    line-height: 1.2;
+  }
+  .card {
+    background-color: #112544;
+    border: 1px solid #1F3E6D;
+    border-radius: 12px;
+    padding: 24px;
+  }
+  .cyan { color: #00BAF2; }
+  .green { color: #10B981; }
+  .amber { color: #F59E0B; }
+  .muted { color: #94A3B8; }
+
+  /* Slide 1 Styles */
+  .s1-container {
+    display: flex;
+    height: 100%;
+    gap: 60px;
+  }
+  .s1-left {
+    flex: 1.1;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+  }
+  .s1-right {
+    flex: 0.9;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+  }
+  .badge {
+    display: inline-block;
+    background: #0E2B52;
+    border: 1px solid #00BAF2;
+    color: #00BAF2;
+    font-size: 15px;
+    font-weight: 700;
+    letter-spacing: 1px;
+    padding: 6px 16px;
+    border-radius: 6px;
+    margin-bottom: 14px;
+    width: fit-content;
+  }
+  .s1-event {
+    font-size: 17px;
+    color: #94A3B8;
+    margin-bottom: 24px;
+  }
+  .s1-title {
+    font-size: 68px;
+    font-weight: 800;
+    color: #F8FAFC;
+    line-height: 1.1;
+    margin-bottom: 18px;
+  }
+  .s1-tagline {
+    font-size: 30px;
+    font-weight: 700;
+    color: #00BAF2;
+    line-height: 1.3;
+    margin-bottom: 20px;
+  }
+  .s1-subpitch {
+    font-size: 19px;
+    color: #94A3B8;
+    line-height: 1.5;
+    margin-bottom: 35px;
+  }
+  .s1-chips {
+    display: flex;
+    gap: 20px;
+    margin-bottom: 35px;
+  }
+  .s1-chip {
+    background: #112544;
+    border: 1px solid #1F3E6D;
+    border-radius: 10px;
+    padding: 12px 20px;
+  }
+  .s1-chip .num {
+    font-size: 20px;
+    font-weight: 700;
+    color: #F8FAFC;
+  }
+  .s1-chip .lbl {
+    font-size: 14px;
+    font-weight: 600;
+  }
+  .s1-builder {
+    font-size: 15px;
+    color: #94A3B8;
+    border-top: 1px solid #1F3E6D;
+    padding-top: 18px;
+  }
+
+  /* Slide 2 Styles */
+  .maze-row {
+    display: flex;
+    gap: 16px;
+    margin-bottom: 30px;
+    background: #102646;
+    border: 1px solid #1F3E6D;
+    border-radius: 12px;
+    padding: 24px;
+  }
+  .maze-col {
+    flex: 1;
+    background: #18325A;
+    border: 1px solid #1F3E6D;
+    border-radius: 8px;
+    padding: 18px;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+  }
+  .pains-row {
+    display: flex;
+    gap: 24px;
+    margin-bottom: 24px;
+  }
+  .pain-card {
+    flex: 1;
+  }
+
+  /* Slide 3 Styles */
+  .s3-steps {
+    display: flex;
+    gap: 18px;
+    margin-bottom: 28px;
+  }
+  .s3-step-card {
+    flex: 1;
+    background: #112544;
+    border: 1px solid #1F3E6D;
+    border-radius: 10px;
+    padding: 20px;
+  }
+  .s3-split {
+    display: flex;
+    gap: 24px;
+    margin-bottom: 20px;
+  }
+
+  /* Slide 4 Styles */
+  .s4-grid {
+    display: flex;
+    gap: 20px;
+    height: 640px;
+    margin-bottom: 20px;
+  }
+  .s4-col {
+    background: #112544;
+    border: 1px solid #1F3E6D;
+    border-radius: 12px;
+    padding: 24px;
+    display: flex;
+    flex-direction: column;
+  }
+
+  /* Slide 5 Table Styles */
+  table.comp-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-bottom: 24px;
+  }
+  table.comp-table th {
+    background-color: #0E2B52;
+    color: #F8FAFC;
+    padding: 16px 20px;
+    text-align: left;
+    font-size: 18px;
+    font-weight: 700;
+    border: 1px solid #1F3E6D;
+  }
+  table.comp-table th:last-child {
+    color: #00BAF2;
+    background-color: #10305C;
+  }
+  table.comp-table td {
+    padding: 14px 20px;
+    font-size: 16px;
+    border: 1px solid #1F3E6D;
+  }
+  table.comp-table tr:nth-child(even) td {
+    background-color: #112544;
+  }
+  table.comp-table tr:nth-child(odd) td {
+    background-color: #152E54;
+  }
+  table.comp-table td:last-child {
+    background-color: #10305C !important;
+    font-weight: 700;
+    color: #00BAF2;
+  }
+
+  /* Slide 6 Styles */
+  .s6-split {
+    display: flex;
+    gap: 24px;
+    margin-bottom: 24px;
+  }
+  .metric-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+    margin-top: 18px;
+  }
+  .metric-card {
+    background: #183056;
+    border: 1px solid #1F3E6D;
+    border-radius: 8px;
+    padding: 18px;
+  }
+  .metric-num {
+    font-size: 42px;
+    font-weight: 800;
+    line-height: 1;
+    margin-bottom: 6px;
+  }
+
+  /* Slide 7 Styles */
+  .s7-flow {
+    display: flex;
+    gap: 20px;
+    background: #0E2648;
+    border: 1px solid #1F3E6D;
+    border-radius: 12px;
+    padding: 18px;
+    margin-bottom: 24px;
+  }
+  .s7-pillar-row {
+    display: flex;
+    gap: 24px;
+    margin-bottom: 24px;
+  }
+</style>
+</head>
+<body>
+
+<!-- SLIDE 1 -->
+<div class="slide" id="slide1">
+  <div class="s1-container">
+    <div class="s1-left">
+      <div class="badge">TRACK 3: AUTONOMOUS AI TEAMMATES</div>
+      <div class="s1-event">Paytm Build for India AI Hackathon | Bengaluru Edition</div>
+      <div class="s1-title">Nexus Teammate</div>
+      <div class="s1-tagline">Closes tickets directly on screen instead of answering with text.</div>
+      <div class="s1-subpitch">Autonomous desktop operations teammate for Paytm customer support and merchant workflows. It executes tasks across internal tools without requiring custom APIs.</div>
+      <div class="s1-chips">
+        <div class="s1-chip">
+          <div class="num">106 Logged Runs</div>
+          <div class="lbl cyan">83% task success rate</div>
+        </div>
+        <div class="s1-chip">
+          <div class="num">7-Tier Self-Healing</div>
+          <div class="lbl green">Adapts when UI changes</div>
+        </div>
+      </div>
+      <div class="s1-builder">Builder: Garv Thakre | GSoC 2026 Contributor at MetaBrainz | Built 90+ production REST APIs</div>
+    </div>
+    <div class="s1-right">
+      <div class="card" style="padding: 16px; height: 900px; display: flex; flex-direction: column;">
+        <div style="font-weight: 700; font-size: 17px; margin-bottom: 12px; color: #F8FAFC;">Nexus Execution Engine: Live Plan & Activity Stream</div>
+        <div style="flex: 1; border-radius: 8px; overflow: hidden; background: #000; display: flex; align-items: center; justify-content: center;">
+          <img src="real_screen_raw.png" style="width: 100%; height: auto; object-fit: contain; border-radius: 6px;">
+        </div>
+        <div class="muted" style="font-size: 14px; margin-top: 12px; line-height: 1.4;">Real runtime UI: generates execution plan, audits security risks, and triggers automated screen steps live.</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- SLIDE 2 -->
+<div class="slide" id="slide2">
+  <div class="tag">The Reality in Support Ops</div>
+  <div class="headline">Support teams spend their day clicking, not solving</div>
+  
+  <div style="font-size: 15px; font-weight: 700; color: #00BAF2; letter-spacing: 1px; margin-bottom: 12px;">THE MANUAL MAZE: ONE TRANSACTION DISPUTE TRAVERSES 5 SEPARATE SCREENS</div>
+  <div class="maze-row">
+    <div class="maze-col">
+      <div>
+        <div style="font-weight: 700; font-size: 18px; margin-bottom: 4px;">1. Ticket Queue</div>
+        <div class="cyan" style="font-size: 14px; margin-bottom: 8px;">Zendesk / CRM</div>
+        <div class="muted" style="font-size: 14px;">Reads user complaint</div>
+      </div>
+      <div class="amber" style="font-size: 13px; font-weight: 700; margin-top: 14px;">[Human clicks here]</div>
+    </div>
+    <div class="maze-col">
+      <div>
+        <div style="font-weight: 700; font-size: 18px; margin-bottom: 4px;">2. Payment Portal</div>
+        <div class="cyan" style="font-size: 14px; margin-bottom: 8px;">Merchant Console</div>
+        <div class="muted" style="font-size: 14px;">Looks up Txn status</div>
+      </div>
+      <div class="amber" style="font-size: 13px; font-weight: 700; margin-top: 14px;">[Human clicks here]</div>
+    </div>
+    <div class="maze-col">
+      <div>
+        <div style="font-weight: 700; font-size: 18px; margin-bottom: 4px;">3. Bank Ledger</div>
+        <div class="cyan" style="font-size: 14px; margin-bottom: 8px;">Banking Gateway</div>
+        <div class="muted" style="font-size: 14px;">Verifies UTR credit</div>
+      </div>
+      <div class="amber" style="font-size: 13px; font-weight: 700; margin-top: 14px;">[Human clicks here]</div>
+    </div>
+    <div class="maze-col">
+      <div>
+        <div style="font-weight: 700; font-size: 18px; margin-bottom: 4px;">4. Dispute Engine</div>
+        <div class="cyan" style="font-size: 14px; margin-bottom: 8px;">Internal Web Tool</div>
+        <div class="muted" style="font-size: 14px;">Checks refund policy</div>
+      </div>
+      <div class="amber" style="font-size: 13px; font-weight: 700; margin-top: 14px;">[Human clicks here]</div>
+    </div>
+    <div class="maze-col">
+      <div>
+        <div style="font-weight: 700; font-size: 18px; margin-bottom: 4px;">5. Payout Desk</div>
+        <div class="cyan" style="font-size: 14px; margin-bottom: 8px;">Finance Tool</div>
+        <div class="muted" style="font-size: 14px;">Executes reversal</div>
+      </div>
+      <div class="amber" style="font-size: 13px; font-weight: 700; margin-top: 14px;">[Human clicks here]</div>
+    </div>
+  </div>
+
+  <div class="pains-row">
+    <div class="card pain-card">
+      <div style="font-weight: 700; font-size: 20px; margin-bottom: 12px; color: #F8FAFC;">Chatbots answer, but humans still click</div>
+      <div class="muted" style="font-size: 16px; line-height: 1.5;">Conversational AI answers queries with text, but human operators still have to manually navigate portals and update records.</div>
+    </div>
+    <div class="card pain-card">
+      <div style="font-weight: 700; font-size: 20px; margin-bottom: 12px; color: #F8FAFC;">Internal operations tools lack APIs</div>
+      <div class="muted" style="font-size: 16px; line-height: 1.5;">Core banking portals, legacy admin consoles, and merchant tools have no programmatic endpoints. Human screens are the only interface.</div>
+    </div>
+    <div class="card pain-card">
+      <div style="font-weight: 700; font-size: 20px; margin-bottom: 12px; color: #F8FAFC;">Routine disputes crowd out complex cases</div>
+      <div class="muted" style="font-size: 16px; line-height: 1.5;">Agents spend over 60% of their shifts repeating the same lookup steps instead of managing escalations and merchant relationships.</div>
+    </div>
+  </div>
+
+  <div class="card" style="border-color: #00BAF2; background: #102646; padding: 20px 28px;">
+    <div style="font-size: 13px; font-weight: 700; color: #00BAF2; margin-bottom: 6px; letter-spacing: 1px;">INDUSTRY REALITY: SUPPORT OVERHEAD IN DIGITAL PAYMENTS</div>
+    <div style="font-size: 17px; color: #F8FAFC; line-height: 1.4;">[ADD SOURCED STAT: Indian payment gateways report up to 30% of support volume comes from transient failed payment disputes and status queries (Source: CXO Digital Pulse / Industry Average)]</div>
+  </div>
+</div>
+
+<!-- SLIDE 3 -->
+<div class="slide" id="slide3">
+  <div class="tag">Autonomous Action, Not Chat</div>
+  <div class="headline">Nexus works the ticket from open to closed</div>
+
+  <div class="s3-steps">
+    <div class="s3-step-card">
+      <div class="cyan" style="font-weight: 800; font-size: 18px; margin-bottom: 6px;">1. READ</div>
+      <div style="font-weight: 700; font-size: 17px; margin-bottom: 8px;">Ingests ticket data</div>
+      <div class="muted" style="font-size: 14px; line-height: 1.4;">Extracts transaction ID, user claim, and order details.</div>
+    </div>
+    <div class="s3-step-card">
+      <div class="cyan" style="font-weight: 800; font-size: 18px; margin-bottom: 6px;">2. PLAN</div>
+      <div style="font-weight: 700; font-size: 17px; margin-bottom: 8px;">Compiles steps</div>
+      <div class="muted" style="font-size: 14px; line-height: 1.4;">Translates task into a strict multi-step browser plan.</div>
+    </div>
+    <div class="s3-step-card">
+      <div class="cyan" style="font-weight: 800; font-size: 18px; margin-bottom: 6px;">3. REVIEW</div>
+      <div style="font-weight: 700; font-size: 17px; margin-bottom: 8px;">Audits safety risks</div>
+      <div class="muted" style="font-size: 14px; line-height: 1.4;">LLM reviews plan; confirms steps before execution.</div>
+      <div class="amber" style="font-size: 12px; font-weight: 700; margin-top: 10px;">[Human in the loop: safety verdict + confirm step]</div>
+    </div>
+    <div class="s3-step-card">
+      <div class="cyan" style="font-weight: 800; font-size: 18px; margin-bottom: 6px;">4. ACT</div>
+      <div style="font-weight: 700; font-size: 17px; margin-bottom: 8px;">Operates screens</div>
+      <div class="muted" style="font-size: 14px; line-height: 1.4;">Navigates dashboards, fills forms, clicks buttons.</div>
+    </div>
+    <div class="s3-step-card">
+      <div class="cyan" style="font-weight: 800; font-size: 18px; margin-bottom: 6px;">5. LOG</div>
+      <div style="font-weight: 700; font-size: 17px; margin-bottom: 8px;">Records every action</div>
+      <div class="muted" style="font-size: 14px; line-height: 1.4;">Appends execution trace to immutable JSONL audit log.</div>
+    </div>
+  </div>
+
+  <div class="s3-split">
+    <div class="card" style="flex: 1.1; padding: 26px;">
+      <div style="font-size: 14px; font-weight: 700; color: #00BAF2; letter-spacing: 1px; margin-bottom: 12px;">TARGET WORKFLOW: FAILED-PAYMENT DISPUTE</div>
+      <div style="font-size: 18px; line-height: 1.5; color: #F8FAFC; margin-bottom: 16px;">A failed-payment dispute arrives. Nexus reads context, plans steps, reviews safety, checks status in the portal, picks refund or escalate, updates the ticket, and logs every step.</div>
+      <div class="muted" style="font-size: 15px; line-height: 1.4;">Target workflow for customer operations. Humans only handle unresolved edge cases.</div>
+    </div>
+    <div class="card" style="flex: 0.9; padding: 20px; display: flex; gap: 20px; align-items: center;">
+      <img src="nexus_ui_plan.png" style="width: 52%; border-radius: 6px; border: 1px solid #1F3E6D;">
+      <div style="flex: 1;">
+        <div style="font-weight: 700; font-size: 15px; color: #00BAF2; margin-bottom: 10px;">CALLOUTS</div>
+        <div style="font-size: 14px; margin-bottom: 8px;"><strong>1. Strict JSON Plan:</strong> deterministic steps.</div>
+        <div style="font-size: 14px; margin-bottom: 8px;"><strong>2. Safety Auditor:</strong> pre-run risk verdict.</div>
+        <div style="font-size: 14px;"><strong>3. Activity Log:</strong> real-time streaming trace.</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card" style="background: #0C203E; border-color: #10B981; padding: 18px 24px;">
+    <div class="green" style="font-weight: 700; font-size: 16px;">BUILT & RUNNING: Runs on a schedule (cron DB triggers) | Switches models on failure (failover routing) | Takes voice commands (browser en-IN, hi-IN)</div>
+  </div>
+</div>
+
+<!-- SLIDE 4 -->
+<div class="slide" id="slide4">
+  <div class="tag">System Architecture</div>
+  <div class="headline">API-first; UI automation for the gaps</div>
+
+  <div class="s4-grid">
+    <div class="s4-col" style="flex: 1.1;">
+      <div class="cyan" style="font-weight: 800; font-size: 16px; letter-spacing: 1px; margin-bottom: 18px;">TRIGGER LAYER</div>
+      <div style="margin-bottom: 16px;">
+        <div style="font-weight: 700; font-size: 16px;">User Prompt (Web UI) [Built]</div>
+        <div class="muted" style="font-size: 13px;">Plain English task entry in Electron/Next.js interface.</div>
+      </div>
+      <div style="margin-bottom: 16px;">
+        <div style="font-weight: 700; font-size: 16px;">Scheduler Service [Built]</div>
+        <div class="muted" style="font-size: 13px;">Cron DB stored schedules for unattended batch jobs.</div>
+      </div>
+      <div style="margin-bottom: 16px;">
+        <div style="font-weight: 700; font-size: 16px;">Voice Input [Built]</div>
+        <div class="muted" style="font-size: 13px;">Browser en-IN & hi-IN voice commands.</div>
+      </div>
+      <div>
+        <div style="font-weight: 700; font-size: 16px;">Webhooks [Built]</div>
+        <div class="muted" style="font-size: 13px;">Trigger task runs and export status events.</div>
+      </div>
+    </div>
+
+    <div class="s4-col" style="flex: 1.1;">
+      <div class="cyan" style="font-weight: 800; font-size: 16px; letter-spacing: 1px; margin-bottom: 18px;">INTELLIGENCE LAYER</div>
+      <div style="margin-bottom: 18px;">
+        <div style="font-weight: 700; font-size: 16px;">Planner (planner.ts)</div>
+        <div class="muted" style="font-size: 13px;">Context budgeting (12K chars); compiles high-level prompt into concrete JSON action steps.</div>
+      </div>
+      <div style="margin-bottom: 18px;">
+        <div style="font-weight: 700; font-size: 16px;">Safety Reviewer</div>
+        <div class="muted" style="font-size: 13px;">Independent LLM safety audit: returns SAFE, REVIEW_REQUIRED, or UNSAFE with risk flags.</div>
+      </div>
+      <div>
+        <div style="font-weight: 700; font-size: 16px;">Provider Failover [Built]</div>
+        <div class="muted" style="font-size: 13px;">Automated fallback routing across Groq Llama 3.3 70B, OpenAI GPT-4o, and Anthropic Claude.</div>
+      </div>
+    </div>
+
+    <div class="s4-col" style="flex: 1.4;">
+      <div class="cyan" style="font-weight: 800; font-size: 16px; letter-spacing: 1px; margin-bottom: 8px;">7-TIER SELF-HEALING ENGINE</div>
+      <div class="muted" style="font-size: 13px; margin-bottom: 14px;">Browser execution cascade (Browserengine.ts):</div>
+      <div style="font-size: 14px; line-height: 2; color: #10B981; font-weight: 600;">Tier -1: Selector Memory (learned cache)</div>
+      <div style="font-size: 14px; line-height: 2;">Tier 0: Direct CSS & Site Handlers</div>
+      <div style="font-size: 14px; line-height: 2;">Tier 1: DOM Fuzzy Scan (keyword scoring)</div>
+      <div style="font-size: 14px; line-height: 2;">Tier 2: Accessibility Tree + Groq</div>
+      <div style="font-size: 14px; line-height: 2;">Tier 3: HTML Context + LLM Re-plan</div>
+      <div style="font-size: 14px; line-height: 2;">Tier 4: URL Parameter Fallback</div>
+      <div style="font-size: 14px; line-height: 2; color: #10B981; font-weight: 600;">Tier 5: Vision Fallback (Gemini Flash)</div>
+    </div>
+
+    <div class="s4-col" style="flex: 1.0;">
+      <div class="cyan" style="font-weight: 800; font-size: 16px; letter-spacing: 1px; margin-bottom: 18px;">ACTIONS & AUDIT</div>
+      <div style="margin-bottom: 14px;">
+        <div style="font-weight: 700; font-size: 15px;">Playwright</div>
+        <div class="muted" style="font-size: 13px;">Browser session automation.</div>
+      </div>
+      <div style="margin-bottom: 14px;">
+        <div style="font-weight: 700; font-size: 15px;">Pywinauto</div>
+        <div class="muted" style="font-size: 13px;">Windows native app control.</div>
+      </div>
+      <div style="margin-bottom: 14px;">
+        <div style="font-weight: 700; font-size: 15px;">Auto-Fix Engine</div>
+        <div class="muted" style="font-size: 13px;">6 script repair patterns.</div>
+      </div>
+      <div style="margin-bottom: 14px;">
+        <div style="font-weight: 700; font-size: 15px;">JSONL Trace</div>
+        <div class="muted" style="font-size: 13px;">Step-level execution logs.</div>
+      </div>
+      <div>
+        <div style="font-weight: 700; font-size: 15px;">PostgreSQL</div>
+        <div class="muted" style="font-size: 13px;">AES-256-GCM encrypted BYOK.</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card" style="padding: 18px 24px;">
+    <div style="font-size: 15px; color: #F8FAFC;"><strong>Core Stack:</strong> TypeScript, Node.js, Express, Playwright, Python (pywinauto), Next.js, PostgreSQL (Prisma), Electron, Docker Compose.</div>
+  </div>
+</div>
+
+<!-- SLIDE 5 -->
+<div class="slide" id="slide5">
+  <div class="tag">Competitive Moat</div>
+  <div class="headline">It works in tools that have no API</div>
+
+  <table class="comp-table">
+    <thead>
+      <tr>
+        <th style="width: 28%;">Capability</th>
+        <th style="width: 17%;">Chatbot</th>
+        <th style="width: 17%;">API Integration</th>
+        <th style="width: 18%;">Scripted RPA</th>
+        <th style="width: 20%;">Nexus Teammate</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><strong>Takes real actions across screens</strong></td>
+        <td class="muted">No (Answers only)</td>
+        <td class="green">Yes</td>
+        <td class="green">Yes</td>
+        <td>Yes</td>
+      </tr>
+      <tr>
+        <td><strong>Works without custom APIs</strong></td>
+        <td class="muted">No</td>
+        <td class="muted">No (Requires APIs)</td>
+        <td class="green">Yes</td>
+        <td>Yes</td>
+      </tr>
+      <tr>
+        <td><strong>Adapts when UI layout changes</strong></td>
+        <td class="muted">No</td>
+        <td class="muted">No</td>
+        <td class="muted">No (Brittle scripts)</td>
+        <td>Yes (7-Tier Healing)</td>
+      </tr>
+      <tr>
+        <td><strong>Pre-execution safety review</strong></td>
+        <td class="muted">No</td>
+        <td class="muted">No</td>
+        <td class="muted">No</td>
+        <td>Yes (Safety verdict)</td>
+      </tr>
+      <tr>
+        <td><strong>Full step-by-step audit trace</strong></td>
+        <td class="muted">Conversation log</td>
+        <td class="muted">Partial API logs</td>
+        <td class="muted">Local log files</td>
+        <td>Yes (JSONL trace + DB)</td>
+      </tr>
+      <tr>
+        <td><strong>Runs unattended on a schedule</strong></td>
+        <td class="muted">No</td>
+        <td class="green">Yes</td>
+        <td class="green">Yes</td>
+        <td>Yes (Cron DB triggers)</td>
+      </tr>
+      <tr>
+        <td><strong>Switches providers on failure</strong></td>
+        <td class="muted">No</td>
+        <td class="muted">No</td>
+        <td class="muted">No</td>
+        <td>Yes (Automatic failover)</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <div class="card" style="border-color: #00BAF2; background: #0E2648; padding: 22px 28px;">
+    <div style="font-size: 18px; font-weight: 700; color: #F8FAFC; line-height: 1.4;">
+      <span class="cyan">THE CORE DIFFERENCE:</span> RPA breaks when a button moves. Chatbots stop at giving advice. Nexus adapts to screen changes and finishes the job.
+    </div>
+  </div>
+</div>
+
+<!-- SLIDE 6 -->
+<div class="slide" id="slide6">
+  <div class="tag">Proven Execution & Measured Outcomes</div>
+  <div class="headline">Proven execution speed with 94.4% support accuracy</div>
+
+  <div class="s6-split">
+    <!-- Left: Historical Runs -->
+    <div class="card" style="flex: 1; padding: 26px;">
+      <div style="font-size: 13px; font-weight: 700; color: #94A3B8; letter-spacing: 1px; margin-bottom: 6px;">HISTORICAL RUNS (GENERAL DESKTOP & WEB TASKS)</div>
+      <div class="muted" style="font-size: 14px; margin-bottom: 18px;">Measured across 106 logged tasks from repository execution logs:</div>
+      <div class="metric-grid">
+        <div class="metric-card">
+          <div class="metric-num cyan">106</div>
+          <div class="muted" style="font-size: 14px;">Recorded runs in log</div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-num cyan">83.0%</div>
+          <div class="muted" style="font-size: 14px;">Fully completed tasks</div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-num cyan">5.0</div>
+          <div class="muted" style="font-size: 14px;">Average steps per task</div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-num cyan">70.5s</div>
+          <div class="muted" style="font-size: 14px;">Average run duration</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Right: Fintech Support Benchmark -->
+    <div class="card" style="flex: 1; padding: 26px;">
+      <div style="font-size: 13px; font-weight: 700; color: #00BAF2; letter-spacing: 1px; margin-bottom: 6px;">PAYTM TRACK 3 BENCHMARK (MOCK SUPPORT CONSOLE)</div>
+      <div class="muted" style="font-size: 14px; margin-bottom: 18px;">18 realistic support operations (disputes, refunds, settlements, duplicate debits, KYC):</div>
+      <div class="metric-grid">
+        <div class="metric-card" style="border-color: #10B981;">
+          <div class="metric-num green">94.4%</div>
+          <div class="muted" style="font-size: 14px;">Support task success rate (17/18)</div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-num cyan">0.90s</div>
+          <div class="muted" style="font-size: 14px;">Average resolution time per task</div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-num cyan">7</div>
+          <div class="muted" style="font-size: 14px;">Self-healing recovery events</div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-num cyan">0.20¢</div>
+          <div class="muted" style="font-size: 14px;">Average cost per ticket ($0.001995)</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div style="display: flex; gap: 24px;">
+    <div class="card" style="flex: 1; padding: 20px;">
+      <div class="cyan" style="font-size: 14px; font-weight: 700; margin-bottom: 8px;">FOR CUSTOMERS</div>
+      <div style="font-size: 16px; color: #F8FAFC;">Immediate dispute resolution with zero waiting queues.</div>
+    </div>
+    <div class="card" style="flex: 1; padding: 20px;">
+      <div class="cyan" style="font-size: 14px; font-weight: 700; margin-bottom: 8px;">FOR SUPPORT AGENTS</div>
+      <div style="font-size: 16px; color: #F8FAFC;">Eliminates repetitive manual portal lookups entirely.</div>
+    </div>
+    <div class="card" style="flex: 1; padding: 20px;">
+      <div class="cyan" style="font-size: 14px; font-weight: 700; margin-bottom: 8px;">FOR PAYTM OPERATIONS</div>
+      <div style="font-size: 16px; color: #F8FAFC;">Reduces cost per resolved ticket at scale.</div>
+    </div>
+  </div>
+</div>
+
+<!-- SLIDE 7 -->
+<div class="slide" id="slide7">
+  <div class="tag">Commercial Strategy & Viability</div>
+  <div class="headline">Pay per ticket resolved, not per seat</div>
+
+  <div class="s7-flow">
+    <div class="card" style="flex: 1; padding: 18px;">
+      <div class="cyan" style="font-weight: 700; font-size: 16px; margin-bottom: 6px;">1. Ticket Resolved</div>
+      <div class="muted" style="font-size: 14px;">Nexus navigates screens and closes dispute.</div>
+    </div>
+    <div class="card" style="flex: 1; padding: 18px;">
+      <div class="cyan" style="font-weight: 700; font-size: 16px; margin-bottom: 6px;">2. Outcome Logged</div>
+      <div class="muted" style="font-size: 14px;">Step trace and audit evidence recorded.</div>
+    </div>
+    <div class="card" style="flex: 1; padding: 18px;">
+      <div class="cyan" style="font-weight: 700; font-size: 16px; margin-bottom: 6px;">3. Micro-Billing Generated</div>
+      <div class="muted" style="font-size: 14px;">Platform billed purely on verified resolution.</div>
+    </div>
+  </div>
+
+  <div class="s7-pillar-row">
+    <div class="card" style="flex: 1; padding: 24px;">
+      <div class="cyan" style="font-size: 13px; font-weight: 700; margin-bottom: 6px;">INTERNAL COST SAVINGS</div>
+      <div style="font-size: 19px; font-weight: 700; color: #F8FAFC; margin-bottom: 12px;">Paytm Support & Ops</div>
+      <div class="muted" style="font-size: 15px; line-height: 1.5;">Directly slashes first-level ticket handling overhead by automating repetitive multi-screen dispute resolutions at ~0.2 cents per execution.</div>
+    </div>
+    <div class="card" style="flex: 1; padding: 24px;">
+      <div class="cyan" style="font-size: 13px; font-weight: 700; margin-bottom: 6px;">OUTCOME-BASED PRICING</div>
+      <div style="font-size: 19px; font-weight: 700; color: #F8FAFC; margin-bottom: 12px;">Pay Per Success</div>
+      <div class="muted" style="font-size: 15px; line-height: 1.5;">Eliminates rigid software seat licensing. Enterprise clients pay strictly for successfully resolved workflows verified in audit traces.</div>
+    </div>
+    <div class="card" style="flex: 1; padding: 24px;">
+      <div class="cyan" style="font-size: 13px; font-weight: 700; margin-bottom: 6px;">COMMERCIAL PRODUCT PATH</div>
+      <div style="font-size: 19px; font-weight: 700; color: #F8FAFC; margin-bottom: 12px;">External Enterprise Offering</div>
+      <div class="muted" style="font-size: 15px; line-height: 1.5;">Package autonomous teammate capability for Paytm payment gateway merchants, partner banks, and NBFC support operations.</div>
+    </div>
+  </div>
+
+  <div class="card" style="border-color: #00BAF2; background: #102646; padding: 22px 28px;">
+    <div style="font-size: 13px; font-weight: 700; color: #00BAF2; margin-bottom: 8px; letter-spacing: 1px;">STRATEGIC ALIGNMENT: PAYTM INTERNAL AI COMMERCIALIZATION INITIATIVE</div>
+    <div style="font-size: 16px; color: #F8FAFC; line-height: 1.5; margin-bottom: 8px;">On its Q1 earnings call, Paytm stated plans to package internal AI tools in merchant support, acquisition, and business automation for external customers. (Source: CXO Digital Pulse)</div>
+    <div class="green" style="font-size: 15px; font-weight: 600;">Unit Economics Benchmark: [Cost per ticket today: Rs 25 to 45 (industry average) vs Cost with Nexus: Rs 0.16 compute cost]</div>
+  </div>
+</div>
+
+</body>
+</html>
+`;
+
+fs.writeFileSync(path.join(__dirname, 'presentation_preview.html'), htmlContent);
+console.log('presentation_preview.html created successfully.');
+
+async function runExport() {
+  const browser = await chromium.launch({ headless: true });
+  const page = await browser.newPage({
+    viewport: { width: 1920, height: 1080 }
+  });
+
+  const fileUrl = 'file://' + path.resolve(__dirname, 'presentation_preview.html').replace(/\\\\/g, '/');
+  await page.goto(fileUrl, { waitUntil: 'networkidle' });
+
+  // Screenshot each slide individually
+  for (let i = 1; i <= 7; i++) {
+    const slideSelector = `#slide${i}`;
+    const slideElement = await page.$(slideSelector);
+    if (slideElement) {
+      const outputPath = path.join(__dirname, `slide_${i}.png`);
+      await slideElement.screenshot({ path: outputPath });
+      console.log(`Saved slide_${i}.png`);
+    }
+  }
+
+  // Generate PDF
+  await page.pdf({
+    path: path.join(__dirname, 'nexus_teammate_pitch_deck.pdf'),
+    printBackground: true,
+    width: '1920px',
+    height: '1080px',
+    pageRanges: '1-7'
+  });
+  console.log('Saved nexus_teammate_pitch_deck.pdf');
+
+  await browser.close();
+}
+
+runExport().catch(err => {
+  console.error(err);
+  process.exit(1);
+});
