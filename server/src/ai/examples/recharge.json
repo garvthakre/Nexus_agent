@@ -1,0 +1,83 @@
+[
+  {
+    "category": "current_page_fill",
+    "request": "fill this form on the current page with 399 recharge for 9876543210 and proceed to checkout",
+    "keywords": ["current", "page", "this", "screen", "recharge", "fill", "checkout", "form", "399"],
+    "steps": [
+      {
+        "capability": "browser_fill",
+        "parameters": { "selector": "input[type='tel'], input[placeholder*='Mobile Number'], input[name*='mobile'], input[type='text']", "value": "9876543210" },
+        "safety_risk": "low",
+        "description": "Fill mobile number on the current open page"
+      },
+      {
+        "capability": "browser_click",
+        "parameters": { "selector": "text=399, button:has-text('399'), div:has-text('399')" },
+        "safety_risk": "low",
+        "description": "Select the 399 plan pack on current page"
+      },
+      {
+        "capability": "browser_click",
+        "parameters": { "selector": "button:has-text('Proceed'), button:has-text('Continue'), button:has-text('Pay'), button:has-text('Recharge')" },
+        "safety_risk": "low",
+        "description": "Click proceed to go to checkout"
+      }
+    ]
+  },
+  {
+    "category": "recharge_prepaid",
+    "request": "do a recharge of 399 airtel for 9876543210 and take me to checkout",
+    "keywords": ["recharge", "airtel", "prepaid", "checkout", "399", "plan", "mobile"],
+    "steps": [
+      {
+        "capability": "browser_open",
+        "parameters": { "url": "https://www.airtel.in/prepaid-recharge/" },
+        "safety_risk": "low",
+        "description": "Open Airtel Prepaid Recharge portal if not already open"
+      },
+      {
+        "capability": "browser_fill",
+        "parameters": { "selector": "input[type='tel'], input[placeholder*='Mobile Number'], input[name*='mobile']", "value": "9876543210" },
+        "safety_risk": "low",
+        "description": "Enter the 10-digit mobile number"
+      },
+      {
+        "capability": "browser_wait_for_element",
+        "parameters": { "selector": "button, a, div", "seconds": 2 },
+        "safety_risk": "low",
+        "description": "Wait for recharge packs to load"
+      },
+      {
+        "capability": "browser_click",
+        "parameters": { "selector": "text=399, button:has-text('399'), div:has-text('399')" },
+        "safety_risk": "low",
+        "description": "Select the 399 recharge plan pack and proceed to checkout"
+      }
+    ]
+  },
+  {
+    "category": "paytm_recharge",
+    "request": "recharge 299 jio on paytm",
+    "keywords": ["paytm", "recharge", "jio", "bill", "payment"],
+    "steps": [
+      {
+        "capability": "browser_open",
+        "parameters": { "url": "https://paytm.com/recharge" },
+        "safety_risk": "low",
+        "description": "Open Paytm Mobile Recharge page"
+      },
+      {
+        "capability": "browser_fill",
+        "parameters": { "selector": "input[type='tel'], input[placeholder*='Mobile']", "value": "{{mobile_number}}" },
+        "safety_risk": "low",
+        "description": "Fill mobile number in Paytm recharge form"
+      },
+      {
+        "capability": "browser_click",
+        "parameters": { "selector": "button:has-text('Proceed to Pay'), button:has-text('Fast Forward')" },
+        "safety_risk": "low",
+        "description": "Proceed to checkout review screen"
+      }
+    ]
+  }
+]

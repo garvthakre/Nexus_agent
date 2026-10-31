@@ -8,173 +8,413 @@
   body {
     background: transparent;
     overflow: hidden;
-    font-family: 'SF Mono', 'Cascadia Code', 'Fira Code', monospace;
-    -webkit-app-region: no-drag;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
     user-select: none;
+    -webkit-app-region: no-drag;
   }
 
+  /* ── COLLAPSED PILL ── */
   #pill {
-    width: 280px;
-    background: rgba(8, 10, 14, 0.82);
-    border: 1px solid rgba(255, 255, 255, 0.07);
-    border-radius: 8px;
-    padding: 10px 12px 8px;
-    backdrop-filter: blur(12px);
-    -webkit-backdrop-filter: blur(12px);
-    transition: opacity 0.4s ease;
+    width: 220px;
+    height: 40px;
+    background: rgba(10, 27, 51, 0.92);
+    border: 1px solid rgba(0, 186, 242, 0.4);
+    border-radius: 20px;
+    padding: 0 14px;
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.4), 0 0 15px rgba(0, 186, 242, 0.2);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    cursor: pointer;
+    transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
   }
 
-  #pill.done {
-    border-color: rgba(16, 185, 129, 0.2);
+  #pill:hover {
+    border-color: #00BAF2;
+    transform: translateY(1px);
+    box-shadow: 0 8px 25px rgba(0, 186, 242, 0.35);
   }
 
-  #label {
+  .pulse-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #00BAF2;
+    box-shadow: 0 0 8px #00BAF2;
+    animation: pulse 1.8s infinite;
+  }
+
+  @keyframes pulse {
+    0% { transform: scale(0.9); opacity: 0.7; }
+    50% { transform: scale(1.2); opacity: 1; }
+    100% { transform: scale(0.9); opacity: 0.7; }
+  }
+
+  .pill-title {
     font-size: 11px;
-    color: rgba(255, 255, 255, 0.45);
-    letter-spacing: 0.04em;
-    white-space: nowrap;
+    font-weight: 700;
+    color: #F8FAFC;
+    letter-spacing: 0.8px;
+    text-transform: uppercase;
+  }
+
+  .pill-shortcut {
+    font-size: 9px;
+    background: rgba(0, 0, 0, 0.4);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    color: #94A3B8;
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-family: monospace;
+  }
+
+  /* ── EXPANDED CARD ── */
+  #card {
+    display: none;
+    width: 380px;
+    height: 480px;
+    background: rgba(10, 27, 51, 0.96);
+    border: 1px solid #1F3E6D;
+    border-radius: 16px;
+    backdrop-filter: blur(24px);
+    -webkit-backdrop-filter: blur(24px);
+    box-shadow: 0 20px 50px rgba(0, 0, 0, 0.7), 0 0 30px rgba(0, 186, 242, 0.15);
+    flex-direction: column;
     overflow: hidden;
-    text-overflow: ellipsis;
-    line-height: 1;
-    margin-bottom: 7px;
-    transition: color 0.3s ease;
   }
 
-  #label span.verb {
-    color: #00d4ff;
+  /* Header */
+  .card-header {
+    height: 48px;
+    background: rgba(17, 37, 68, 0.85);
+    border-bottom: 1px solid #1F3E6D;
+    padding: 0 14px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
   }
 
-  #label.done-label span.verb {
-    color: #10b981;
+  .brand {
+    display: flex;
+    align-items: center;
+    gap: 8px;
   }
 
-  #bar-track {
-    width: 100%;
-    height: 2px;
-    background: rgba(255, 255, 255, 0.06);
-    border-radius: 2px;
-    overflow: hidden;
+  .brand-icon {
+    width: 22px;
+    height: 22px;
+    background: #00BAF2;
+    border-radius: 5px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #0A1B33;
+    font-weight: 900;
+    font-size: 12px;
   }
 
-  #bar-fill {
-    height: 100%;
-    width: 0%;
-    background: #00d4ff;
-    border-radius: 2px;
-    transition: width 0.35s cubic-bezier(0.4, 0, 0.2, 1),
-                background 0.4s ease;
-    box-shadow: 0 0 6px rgba(0, 212, 255, 0.5);
+  .brand-text {
+    font-size: 11px;
+    font-weight: 800;
+    color: #F8FAFC;
+    letter-spacing: 0.8px;
   }
 
-  #bar-fill.done {
-    background: #10b981;
-    box-shadow: 0 0 6px rgba(16, 185, 129, 0.5);
+  .status-tag {
+    font-size: 9px;
+    color: #00BAF2;
+    font-family: monospace;
+  }
+
+  .btn-close {
+    background: none;
+    border: none;
+    color: #94A3B8;
+    font-size: 15px;
+    cursor: pointer;
+    padding: 4px 8px;
+    border-radius: 4px;
+  }
+
+  .btn-close:hover {
+    color: white;
+    background: rgba(255, 255, 255, 0.1);
+  }
+
+  /* Shortcuts strip */
+  .shortcuts-strip {
+    padding: 10px 12px;
+    background: rgba(13, 33, 63, 0.5);
+    border-bottom: 1px solid rgba(31, 62, 109, 0.5);
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+
+  .chip {
+    font-size: 10.5px;
+    padding: 4px 10px;
+    background: #112544;
+    border: 1px solid #1F3E6D;
+    color: #E2E8F0;
+    border-radius: 12px;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+
+  .chip:hover {
+    border-color: #00BAF2;
+    color: #00BAF2;
+    background: rgba(0, 186, 242, 0.15);
+  }
+
+  /* Feed / Status */
+  .feed-area {
+    flex: 1;
+    padding: 12px;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .status-line {
+    font-size: 11px;
+    color: #00BAF2;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-weight: 500;
+  }
+
+  .step-box {
+    background: rgba(17, 37, 68, 0.6);
+    border: 1px solid rgba(255, 255, 255, 0.05);
+    border-radius: 6px;
+    padding: 7px 10px;
+    font-size: 11px;
+    color: #CBD5E1;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+
+  .handoff-box {
+    background: rgba(16, 185, 129, 0.12);
+    border: 1px solid rgba(16, 185, 129, 0.35);
+    border-radius: 8px;
+    padding: 9px 11px;
+    font-size: 11px;
+    color: #6EE7B7;
+    line-height: 1.4;
+  }
+
+  /* Input area */
+  .input-area {
+    padding: 10px;
+    background: rgba(17, 37, 68, 0.95);
+    border-top: 1px solid #1F3E6D;
+  }
+
+  .input-row {
+    display: flex;
+    gap: 6px;
+  }
+
+  input[type="text"] {
+    flex: 1;
+    background: rgba(0, 0, 0, 0.5);
+    border: 1px solid #1F3E6D;
+    border-radius: 8px;
+    padding: 7px 10px;
+    font-size: 11.5px;
+    color: white;
+    outline: none;
+    user-select: text;
+    -webkit-user-select: text;
+  }
+
+  input[type="text"]:focus {
+    border-color: #00BAF2;
+  }
+
+  .btn-submit {
+    background: #00BAF2;
+    color: #0A1B33;
+    font-weight: 700;
+    font-size: 11px;
+    border: none;
+    border-radius: 8px;
+    padding: 0 14px;
+    cursor: pointer;
+  }
+
+  .btn-submit:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
   }
 </style>
 </head>
 <body>
-<div id="pill">
-  <div id="label"><span class="verb">nexus</span>&nbsp;·&nbsp;ready</div>
-  <div id="bar-track">
-    <div id="bar-fill"></div>
+
+<!-- ── PILL (Collapsed State) ── -->
+<div id="pill" onclick="openAssistant()">
+  <div style="display: flex; align-items: center; gap: 8px;">
+    <div class="pulse-dot"></div>
+    <div class="pill-title">Nexus Assist</div>
+  </div>
+  <div class="pill-shortcut">Ctrl+Space</div>
+</div>
+
+<!-- ── CARD (Expanded State) ── -->
+<div id="card">
+  <div class="card-header">
+    <div class="brand">
+      <div class="brand-icon">⚡</div>
+      <div>
+        <div class="brand-text">NEXUS COPILOT</div>
+        <div class="status-tag">● ALWAYS ON DESKTOP</div>
+      </div>
+    </div>
+    <button class="btn-close" onclick="closeAssistant()">✕</button>
+  </div>
+
+  <div class="shortcuts-strip">
+    <div class="chip" style="border-color:#00BAF2;color:#00BAF2;background:rgba(0,186,242,0.15);" onclick="quickRun('Fill this form on the current page with 399 recharge for 9876543210 and proceed to checkout')">🎯 Scan & Act on Current Page</div>
+    <div class="chip" onclick="quickRun('Do a recharge of 399 Airtel for 9876543210 and open checkout')">⚡ Airtel ₹399 Recharge</div>
+    <div class="chip" onclick="quickRun('Recharge 299 Jio on mobile portal')">⚡ Jio ₹299 Plan</div>
+  </div>
+
+  <div class="feed-area" id="feed">
+    <div class="status-line" id="status-text">⚡ Ready for any screen automation</div>
+  </div>
+
+  <div class="input-area">
+    <div class="input-row">
+      <input type="text" id="prompt-input" placeholder="e.g. Recharge 399 Airtel..." onkeydown="handleKey(event)" />
+      <button class="btn-submit" id="btn-go" onclick="submitPrompt()">Go</button>
+    </div>
+    <div style="display: flex; justify-content: space-between; font-size: 9.5px; color: #64748B; margin-top: 5px;">
+      <span>Enter to execute</span>
+      <span>Stops safely before payment</span>
+    </div>
   </div>
 </div>
 
 <script>
-  const label   = document.getElementById('label');
-  const barFill = document.getElementById('bar-fill');
-  const pill    = document.getElementById('pill');
+  let isExpanded = false;
+  const pill = document.getElementById('pill');
+  const card = document.getElementById('card');
+  const statusText = document.getElementById('status-text');
+  const feed = document.getElementById('feed');
+  const input = document.getElementById('prompt-input');
+  const btnGo = document.getElementById('btn-go');
 
-  let total     = 0;
-  let completed = 0;
-
-  // ── Truncate helper ───────────────────────────────────────────────────────
-  function truncate(str, max) {
-    return str.length > max ? str.slice(0, max) + '…' : str;
-  }
-
-  // ── Render label: splits "verb: rest" and colors the verb ─────────────────
-  function setLabel(text, isDone) {
-    const colonIdx = text.indexOf(':');
-    if (colonIdx !== -1) {
-      const verb = text.slice(0, colonIdx);
-      const rest = truncate(text.slice(colonIdx), 34);
-      label.innerHTML = `<span class="verb">${verb}</span>${rest}`;
-    } else {
-      label.innerHTML = `<span class="verb">${truncate(text, 38)}</span>`;
+  function openAssistant() {
+    isExpanded = true;
+    pill.style.display = 'none';
+    card.style.display = 'flex';
+    if (window.overlayAPI) {
+      window.overlayAPI.setExpanded(true);
     }
-    label.className = isDone ? 'done-label' : '';
+    input.focus();
   }
 
-  // ── Progress ──────────────────────────────────────────────────────────────
-  function setProgress(pct, done) {
-    barFill.style.width = pct + '%';
-    if (done) {
-      barFill.classList.add('done');
-      pill.classList.add('done');
-    } else {
-      barFill.classList.remove('done');
-      pill.classList.remove('done');
+  function closeAssistant() {
+    isExpanded = false;
+    card.style.display = 'none';
+    pill.style.display = 'flex';
+    if (window.overlayAPI) {
+      window.overlayAPI.setExpanded(false);
     }
   }
 
-  // ── WebSocket ─────────────────────────────────────────────────────────────
-  const WS_URL = 'ws://localhost:3001';
+  function handleKey(e) {
+    if (e.key === 'Enter') submitPrompt();
+    if (e.key === 'Escape') closeAssistant();
+  }
 
-  function connect() {
-    const ws = new WebSocket(WS_URL);
+  function quickRun(text) {
+    input.value = text;
+    submitPrompt();
+  }
 
-    ws.onmessage = (e) => {
-      let msg;
-      try { msg = JSON.parse(e.data); } catch { return; }
+  async function submitPrompt() {
+    const text = input.value.trim();
+    if (!text) return;
 
-      switch (msg.type) {
-        case 'execution_start':
-          total     = msg.totalSteps || 0;
-          completed = 0;
-          setProgress(0, false);
-          setLabel('starting: ' + total + ' steps', false);
-          break;
+    btnGo.disabled = true;
+    statusText.innerText = 'Analyzing request and compiling plan...';
+    
+    // Clear old steps
+    feed.innerHTML = '<div class="status-line" id="status-text">⚡ Compiling plan...</div>';
 
-        case 'step_start':
-          if (msg.step && msg.step.description) {
-            // Build a short "verb: detail" string from the step
-            const cap  = (msg.step.capability || '').replace(/_/g, ' ');
-            const desc = msg.step.description || '';
-            // Use capability as verb, trim description for the rest
-            const short = cap + ': ' + truncate(desc, 26);
-            setLabel(short, false);
-          }
-          break;
+    try {
+      const token = localStorage.getItem('nexus_token');
+      const authHeaders = { 'Content-Type': 'application/json' };
+      if (token) authHeaders['Authorization'] = `Bearer ${token}`;
 
-        case 'step_complete':
-          completed++;
-          const pct = total > 0 ? Math.round((completed / total) * 100) : 0;
-          setProgress(pct, false);
-          break;
+      const res = await fetch('http://localhost:3001/api/plan', {
+        method: 'POST',
+        headers: authHeaders,
+        body: JSON.stringify({ prompt: text, requireCurrentPage: true })
+      });
+      const data = await res.json();
+      
+      if (!res.ok) throw new Error(data.error || 'Failed to create plan');
 
-        case 'execution_complete':
-          setProgress(100, true);
-          setLabel('done: all steps complete', true);
-          break;
+      const plan = data.plan;
+      document.getElementById('status-text').innerText = `Plan created (${plan.steps.length} steps). Running...`;
 
-        case 'execution_stopped':
-          setLabel('stopped', false);
-          break;
+      // Render steps
+      feed.innerHTML = `<div class="status-line" id="status-text">⚡ Executing ${plan.steps.length} steps...</div>`;
+      plan.steps.forEach(s => {
+        const row = document.createElement('div');
+        row.className = 'step-box';
+        row.id = 'step-' + s.step_number;
+        row.innerHTML = `<span>#${s.step_number} ${s.description}</span><span style="color:#00BAF2">•</span>`;
+        feed.appendChild(row);
+      });
 
-        case 'execution_failed':
-          setLabel('error: step ' + (msg.stepNumber || '?'), false);
-          barFill.style.background = '#ef4444';
-          barFill.style.boxShadow  = '0 0 6px rgba(239,68,68,0.5)';
-          break;
+      // Execute
+      const executeRes = await fetch('http://localhost:3001/api/execute', {
+        method: 'POST',
+        headers: authHeaders,
+        body: JSON.stringify({ sessionId: data.sessionId })
+      });
+      if (!executeRes.ok) {
+        const executeData = await executeRes.json().catch(() => ({}));
+        throw new Error(executeData.error || 'Failed to start execution');
       }
-    };
 
-    ws.onclose = () => setTimeout(connect, 3000);
-    ws.onerror = () => ws.close();
+    } catch (err) {
+      feed.innerHTML = `<div class="status-line" style="color:#EF4444;">❌ Error: ${err.message}</div>`;
+      btnGo.disabled = false;
+    }
   }
 
-  connect();
+  // ── WebSocket Listener for Live Steps ──
+  const ws = new WebSocket('ws://localhost:3001');
+  ws.onmessage = (e) => {
+    try {
+      const msg = JSON.parse(e.data);
+      if (msg.type === 'step_start' && msg.stepNumber) {
+        const el = document.getElementById('step-' + msg.stepNumber);
+        if (el) el.querySelector('span:last-child').innerHTML = '<span style="color:#00BAF2;font-weight:bold;">Running</span>';
+      } else if (msg.type === 'step_complete' && msg.stepNumber) {
+        const el = document.getElementById('step-' + msg.stepNumber);
+        if (el) el.querySelector('span:last-child').innerHTML = '<span style="color:#10B981;font-weight:bold;">✓</span>';
+      } else if (msg.type === 'execution_complete') {
+        const hBox = document.createElement('div');
+        hBox.className = 'handoff-box';
+        hBox.innerHTML = '<strong>🛡️ Safe Hand-off Complete:</strong> Reached destination / checkout page! Please enter your payment PIN / credentials directly to finish.';
+        feed.appendChild(hBox);
+        btnGo.disabled = false;
+      }
+    } catch (err) {}
+  };
 </script>
 </body>
 </html>

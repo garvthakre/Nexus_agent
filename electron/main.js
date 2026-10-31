@@ -8,59 +8,69 @@ let backendProcess
 
 function startBackend() {
   console.log('[Electron] Starting backend server...')
-  const backendPath = path.join(__dirname, '../backend')
+  const backendPath = path.join(__dirname, '../server')
 
-  backendProcess = spawn('node', ['server.js'], {
+  backendProcess = spawn('npm', ['run', 'dev'], {
     cwd: backendPath,
     env: { ...process.env },
+    shell: true,
     stdio: 'pipe'
   })
 
-  backendProcess.stdout.on('data', (data) => {
+  backendProcess.stdout?.on('data', (data) => {
     console.log('[Backend]', data.toString().trim())
   })
 
-  backendProcess.stderr.on('data', (data) => {
+  backendProcess.stderr?.on('data', (data) => {
     console.error('[Backend Error]', data.toString().trim())
-  })
-
-  backendProcess.on('exit', (code) => {
-    console.log('[Backend] Exited with code:', code)
   })
 }
 
 function createOverlay() {
-  const { width, height } = screen.getPrimaryDisplay().workAreaSize
+  const primaryDisplay = screen.getPrimaryDisplay()
+  const { width } = primaryDisplay.workAreaSize
 
-  const W = 280
-  const H = 48
-  const MARGIN = 16
+  const COLLAPSED_W = 230
+  const COLLAPSED_H = 46
+  const TOP_MARGIN = 20
+  const LEFT_MARGIN = 24
 
   overlayWindow = new BrowserWindow({
-    width: W,
-    height: H,
-    x: width - W - MARGIN,
-    y: height - H - MARGIN,
+    width: COLLAPSED_W,
+    height: COLLAPSED_H,
+    x: LEFT_MARGIN,
+    y: TOP_MARGIN,
     frame: false,
     transparent: true,
     alwaysOnTop: true,
     skipTaskbar: true,
     resizable: false,
-    movable: false,
-    focusable: false,
+    movable: true,
+    focusable: true,
     hasShadow: false,
-    type: 'panel',
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
+      preload: path.join(__dirname, 'overlayPreload.js')
     }
   })
 
   overlayWindow.setAlwaysOnTop(true, 'screen-saver')
-  overlayWindow.setIgnoreMouseEvents(true)
-  overlayWindow.setVisibleOnAllWorkspaces(true)
+  overlayWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
 
   overlayWindow.loadFile(path.join(__dirname, 'overlay.html'))
+
+  // IPC handler to expand/collapse the overlay window
+  ipcMain.on('overlay-set-expanded', (_, expanded) => {
+    if (!overlayWindow) return
+    if (expanded) {
+      overlayWindow.setSize(380, 480)
+      overlayWindow.show()
+      overlayWindow.focus()
+    } else {
+      overlayWindow.setSize(COLLAPSED_W, COLLAPSED_H)
+    }
+  })
 
   overlayWindow.on('closed', () => { overlayWindow = null })
 }
@@ -78,36 +88,21 @@ function createWindow() {
       nodeIntegration: false,
       contextIsolation: true,
       preload: path.join(__dirname, 'preload.js')
-    },
-    icon: path.join(__dirname, 'icon.png')
+    }
   })
 
-  const isDev = process.env.NODE_ENV === 'development'
-  if (isDev) {
-    mainWindow.loadURL('http://localhost:3000')
-    mainWindow.webContents.openDevTools()
-  } else {
-    mainWindow.loadFile(path.join(__dirname, '../frontend/out/index.html'))
-  }
-
+  mainWindow.loadURL('http://localhost:3000')
   mainWindow.on('closed', () => { mainWindow = null })
 }
 
 app.whenReady().then(() => {
-  startBackend()
-  setTimeout(() => {
-    createWindow()
-    createOverlay()
-  }, 1500)
+  createOverlay()
+  createWindow()
 })
 
 app.on('window-all-closed', () => {
   if (backendProcess) backendProcess.kill()
   if (process.platform !== 'darwin') app.quit()
-})
-
-app.on('activate', () => {
-  if (BrowserWindow.getAllWindows().length === 0) createWindow()
 })
 
 // Window controls via IPC
@@ -116,7 +111,5 @@ ipcMain.on('window-maximize', () => {
   if (mainWindow?.isMaximized()) mainWindow.restore()
   else mainWindow?.maximize()
 })
-ipcMain.on('window-close', () => mainWindow?.close())
-
-// Open external URLs in browser
+ipcMain.on('window-close', () => app.quit())
 ipcMain.on('open-external', (_, url) => shell.openExternal(url))

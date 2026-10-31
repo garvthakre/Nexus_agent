@@ -26,7 +26,8 @@ export type Capability =
   | 'browser_extract_results'
   | 'browser_wait_for_element'      
   | 'browser_get_page_state'       
-  | 'browser_screenshot_analyze' 
+  | 'browser_screenshot_analyze'
+  | 'browser_scan_current_page' 
   | 'browser_screenshot'    
 
   // App automation
@@ -59,6 +60,7 @@ export type Capability =
 export interface StepParameters {
   // browser_open
   url?: string;
+  expected_url_includes?: string;
 
   // browser_click / browser_fill / browser_wait_for_element
   selector?: string;

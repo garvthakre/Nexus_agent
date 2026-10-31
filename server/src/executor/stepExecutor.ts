@@ -21,6 +21,7 @@ const execAsync = promisify(exec);
 let browserInstance: import('playwright').Browser | null = null;
 let pageInstance:    import('playwright').Page    | null = null;
 let browserContext:  import('playwright').BrowserContext | null = null;
+let isCdpMode = false;   // true when connected to user's own Chrome via CDP port 9222
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -138,8 +139,95 @@ export function getLivePage(): import('playwright').Page | null {
 
 const AUTH_STATE_PATH = path.join(process.cwd(), 'auth-state.json');
 
+/**
+ * Find the user's active browsing tab (e.g. Paytm, Airtel, Amazon).
+ * Specifically avoids picking the internal Nexus dashboard (localhost:3000)
+ * when the user is trying to automate a real web page.
+ */
+async function getActiveUserPage(context: import('playwright').BrowserContext): Promise<import('playwright').Page | null> {
+  const allPages = context.pages().filter(p => {
+    try {
+      const u = p.url();
+      return !u.startsWith('chrome://') &&
+             !u.startsWith('devtools://') &&
+             !u.startsWith('chrome-extension://');
+    } catch {
+      return false;
+    }
+  });
+
+  if (allPages.length === 0) return null;
+
+  // Filter out internal Nexus web app if ANY other tab exists
+  const externalPages = allPages.filter(p => {
+    try {
+      const u = p.url();
+      return !u.includes('localhost:3000') &&
+             !u.includes('127.0.0.1:3000') &&
+             !u.includes('localhost:3001');
+    } catch {
+      return false;
+    }
+  });
+
+  const candidates = externalPages.length > 0 ? externalPages : allPages;
+
+  // 1. Look for the tab that is currently visible / focused in Chrome
+  for (const p of candidates) {
+    try {
+      const isVisible = await p.evaluate(() => document.visibilityState === 'visible');
+      if (isVisible) {
+        return p;
+      }
+    } catch {
+      // ignore
+    }
+  }
+
+  // 2. Otherwise return the latest non-Nexus tab
+  return candidates[candidates.length - 1];
+}
+
+/**
+ * Attach only to the Chrome instance that was launched with port 9222.
+ * Unlike ensurePlaywright(), this must never create another browser: callers
+ * use it when they explicitly require work on the tab currently in front of
+ * the user.
+ */
+async function connectToCurrentChrome(): Promise<import('playwright').Page | null> {
+  try {
+    const { chromium } = await import('playwright-extra');
+    const existingBrowser = await chromium.connectOverCDP('http://localhost:9222');
+    const context = existingBrowser.contexts()[0];
+    if (!context) return null;
+
+    const activeTab = await getActiveUserPage(context);
+    if (!activeTab) return null;
+
+    browserInstance = existingBrowser as unknown as import('playwright').Browser;
+    browserContext = context;
+    pageInstance = activeTab;
+    isCdpMode = true;
+    console.log(`[Browser] ✓ Connected to current Chrome tab: "${activeTab.url()}"`);
+    return activeTab;
+  } catch {
+    return null;
+  }
+}
+
 async function ensurePlaywright(): Promise<import('playwright').Page> {
-  if (pageInstance) {
+  // If already in CDP mode, dynamically find the active user tab
+  if (browserContext && isCdpMode) {
+    try {
+      const activeTab = await getActiveUserPage(browserContext);
+      if (activeTab) {
+        pageInstance = activeTab;
+        return pageInstance;
+      }
+    } catch {
+      pageInstance = null;
+    }
+  } else if (pageInstance) {
     try {
       await pageInstance.evaluate(() => true);
       return pageInstance;
@@ -153,6 +241,10 @@ async function ensurePlaywright(): Promise<import('playwright').Page> {
   const { chromium } = await import('playwright-extra');
   const StealthPlugin = (await import('puppeteer-extra-plugin-stealth')).default;
   chromium.use(StealthPlugin());
+
+  // ── First: use the user's CDP-enabled Chrome when it is available ──
+  const currentChromePage = await connectToCurrentChrome();
+  if (currentChromePage) return currentChromePage;
 
   const hasAuthState = fsSync.existsSync(AUTH_STATE_PATH);
   if (hasAuthState) {
@@ -201,6 +293,7 @@ async function ensurePlaywright(): Promise<import('playwright').Page> {
 
   return pageInstance;
 }
+
 
 // ─── Bot Detection ────────────────────────────────────────────────────────────
 
@@ -269,13 +362,14 @@ export async function executeStep(step: PlanStep, userId?: string): Promise<Step
     case 'open_application':            return openApplication(parameters.app_name);
     case 'set_wallpaper':               return setWallpaper(parameters.query);
     case 'run_shell_command':           return runShellCommand(parameters.command);
-    case 'browser_open':                return browserOpen(parameters.url);
+    case 'browser_open':                return browserOpen(parameters.url, parameters.expected_url_includes);
     case 'browser_fill':                return browserFill(parameters.selector, parameters.value, userId);
     case 'browser_click':               return browserClick(parameters.selector, userId);
     case 'browser_read_page':           return browserReadPage(parameters.variable_name, parameters.topic);
     case 'browser_extract_results':     return browserExtractResults(parameters.variable_name, parameters.count ?? 10);
     case 'browser_wait_for_element':    return browserWaitForElement(parameters.selector, parameters.seconds ?? 10);
     case 'browser_get_page_state':      return browserGetPageState();
+    case 'browser_scan_current_page':   return browserScanCurrentPage();
     case 'browser_screenshot_analyze':  return browserScreenshotAnalyze(parameters.target_description, parameters.action ?? 'click', parameters.value, userId);
     case 'type_text':                   return typeText(parameters.text);
     case 'create_file':                 return createFile(parameters.path, parameters.content ?? '');
@@ -298,7 +392,7 @@ export async function executeStep(step: PlanStep, userId?: string): Promise<Step
 
 // ─── Browser Open ─────────────────────────────────────────────────────────────
 
-async function browserOpen(url: string | undefined): Promise<StepResult> {
+async function browserOpen(url: string | undefined, expectedUrlIncludes?: string): Promise<StepResult> {
   if (!url) throw new Error('url is required');
 
   url = url.replace(/\{\{([^}]+)\}\}/g, (match, key) => {
@@ -324,6 +418,7 @@ if (url.startsWith('file://')) {
 }
 
   const page = await ensurePlaywright();
+
   const { waitUntil, extraWait } = getWaitStrategy(url);
   console.log(`[browserOpen] waitUntil="${waitUntil}" extraWait=${extraWait}ms for ${url}`);
 
@@ -331,9 +426,14 @@ if (url.startsWith('file://')) {
   await sleep(extraWait);
   await handleBotDetection(page);
 
-  const title = await page.title().catch(() => url!);
-  console.log(`[Browser] Loaded: "${title}" — ${url}`);
-  return { success: true, url, title, message: `Opened ${url} — "${title}"` };
+  const finalUrl = page.url();
+  if (expectedUrlIncludes && !finalUrl.includes(expectedUrlIncludes)) {
+    throw new Error(`Navigation ended at ${finalUrl}, expected a URL containing "${expectedUrlIncludes}"`);
+  }
+
+  const title = await page.title().catch(() => finalUrl);
+  console.log(`[Browser] Loaded: "${title}" — ${finalUrl}`);
+  return { success: true, url: finalUrl, title, message: `Opened ${finalUrl} — "${title}"` };
 }
 
 // ─── Page Snapshot (for click verification) ───────────────────────────────────
@@ -890,6 +990,130 @@ async function browserGetPageState(): Promise<StepResult> {
     ...state,
   };
 }
+
+// ─── Scan Current Page (CDP context-aware) ────────────────────────────────────
+
+/**
+ * Deep-scan the currently-open browser tab.
+ * Returns URL, title, visible text, all input/select/textarea elements,
+ * buttons, and links — everything the AI planner needs to act on the page
+ * WITHOUT navigating away.
+ */
+export async function scanCurrentPage(): Promise<{
+  url: string; title: string; text: string;
+  inputs: { selector: string; type: string; name: string; placeholder: string; value: string; label: string }[];
+  buttons: { selector: string; text: string }[];
+  links: { href: string; text: string }[];
+  cdpConnected: boolean;
+}> {
+  try {
+    // Scanning for the panel must not create a separate browser window. If the
+    // visible tab is not connected through CDP, return a clear disconnected
+    // state so the route can tell the user how to connect it.
+    let page = isCdpMode && browserContext
+      ? await getActiveUserPage(browserContext)
+      : null;
+    if (!page) {
+      isCdpMode = false;
+      browserContext = null;
+      pageInstance = null;
+      page = await connectToCurrentChrome();
+    }
+    if (!page) {
+      return {
+        url: '', title: '', text: '',
+        inputs: [], buttons: [], links: [],
+        cdpConnected: false,
+      };
+    }
+    pageInstance = page;
+    const result = await page.evaluate(() => {
+      // Collect all visible inputs, selects, textareas
+      const inputs = Array.from(document.querySelectorAll('input, select, textarea')).slice(0, 40).map((el, i) => {
+        const inp = el as HTMLInputElement;
+        const rect = el.getBoundingClientRect();
+        if (rect.width === 0 && rect.height === 0) return null; // hidden
+        // Try to find a label
+        let label = '';
+        if (inp.id) {
+          const labelEl = document.querySelector('label[for="' + inp.id + '"]');
+          if (labelEl) label = (labelEl.textContent ?? '').trim();
+        }
+        if (!label) {
+          const parent = el.closest('label, .form-group, .field, [class*="input"], [class*="field"]');
+          if (parent) label = (parent.textContent ?? '').trim().slice(0, 60);
+        }
+        // Build a useful CSS selector
+        let selector = el.tagName.toLowerCase();
+        if (inp.id) selector += '#' + CSS.escape(inp.id);
+        else if (inp.name) selector += '[name="' + inp.name + '"]';
+        else if (inp.placeholder) selector += '[placeholder="' + inp.placeholder + '"]';
+        else selector += ':nth-of-type(' + (i + 1) + ')';
+
+        return {
+          selector,
+          type: inp.type || el.tagName.toLowerCase(),
+          name: inp.name || '',
+          placeholder: inp.placeholder || '',
+          value: inp.value || '',
+          label: label.slice(0, 80),
+        };
+      }).filter(Boolean) as any[];
+
+      // Collect visible buttons
+      const buttons = Array.from(document.querySelectorAll('button, [role="button"], input[type="submit"], a.btn, a[class*="button"]')).slice(0, 20).map((el, i) => {
+        const rect = el.getBoundingClientRect();
+        if (rect.width === 0 && rect.height === 0) return null;
+        let selector = el.tagName.toLowerCase();
+        if (el.id) selector += '#' + CSS.escape(el.id);
+        else if ((el as HTMLElement).getAttribute('data-testid')) selector += '[data-testid="' + (el as HTMLElement).getAttribute('data-testid') + '"]';
+        else selector += ':nth-of-type(' + (i + 1) + ')';
+        return {
+          selector,
+          text: (el.textContent ?? '').trim().slice(0, 60),
+        };
+      }).filter(Boolean) as any[];
+
+      // Collect key links
+      const links = Array.from(document.querySelectorAll('a[href]')).slice(0, 15).map(el => ({
+        href: (el as HTMLAnchorElement).href,
+        text: (el.textContent ?? '').trim().slice(0, 60),
+      })).filter(l => l.text.length > 0);
+
+      // Page text (truncated)
+      const text = (document.body.innerText ?? '').slice(0, 2000);
+
+      return {
+        url: window.location.href,
+        title: document.title,
+        text,
+        inputs,
+        buttons,
+        links,
+      };
+    });
+    return { ...result, cdpConnected: isCdpMode };
+  } catch (err) {
+    return {
+      url: '', title: '', text: '',
+      inputs: [], buttons: [], links: [],
+      cdpConnected: false,
+    };
+  }
+}
+
+async function browserScanCurrentPage(): Promise<StepResult> {
+  const scan = await scanCurrentPage();
+  const inputSummary = scan.inputs.map(i => `  [${i.type}] ${i.selector} (${i.label || i.placeholder || i.name}): "${i.value}"`).join('\n');
+  const buttonSummary = scan.buttons.map(b => `  ${b.selector}: "${b.text}"`).join('\n');
+  return {
+    success: true,
+    message: `Scanned current page: "${scan.title}" at ${scan.url}\nInputs:\n${inputSummary}\nButtons:\n${buttonSummary}`,
+    url: scan.url,
+    title: scan.title,
+  };
+}
+
 
 // ─── Desktop App Steps ────────────────────────────────────────────────────────
 

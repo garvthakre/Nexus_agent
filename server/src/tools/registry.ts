@@ -75,6 +75,7 @@ const baseCapabilities = [
   'browser_wait_for_element',
   'browser_get_page_state',
   'browser_screenshot',
+  'browser_scan_current_page',
   'type_text',
   'create_file',
   'create_folder',

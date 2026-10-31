@@ -39,6 +39,24 @@ CRITICAL — NEVER use open_application for browsers (Chrome, Edge, Firefox, Saf
   "open Chrome and search X"  → ONE step: browser_open { url: "https://www.bing.com/search?q=X" }
   "open Edge and go to X"     → ONE step: browser_open { url: "X" }
   browser_open already launches Chrome. open_application + browser_open = two windows. BANNED.
+
+MODEL E: Current-Page Interaction (CDP mode)
+  When the user prompt contains [CURRENT PAGE CONTEXT], the user is ALREADY viewing a page.
+  CRITICAL RULES for current-page mode:
+  1. Do NOT start with browser_open unless you need a COMPLETELY DIFFERENT website.
+  2. The first step should be browser_fill or browser_click using the selectors from the page context.
+  3. Use the EXACT selectors listed in the context (e.g. input#mobileNumber, button#payButton).
+  4. If you need to navigate within the same site (e.g. click a "Recharge" link), use browser_click on the link.
+  5. After clicking something that loads a new page section, use browser_scan_current_page to see what's there now.
+  6. browser_scan_current_page: scans the current tab and returns all inputs, buttons, links on screen.
+  7. Keep working on the SAME TAB. Never open new tabs or windows.
+  Example: User is on paytm.com and says "recharge 399 Airtel for 9876543210":
+    Step 1: browser_click on the recharge/mobile link if not already on recharge page
+    Step 2: browser_fill { selector: "input matching mobile number field", value: "9876543210" }
+    Step 3: browser_click on the operator/plan selector
+    Step 4: browser_fill or browser_click to select 399 plan
+    Step 5: browser_click on proceed/recharge button
+    (STOP before payment — safe handoff)
 ═══════════════════════════════════════════════
 APP ROUTING TABLE
 ═══════════════════════════════════════════════
@@ -525,6 +543,7 @@ function detectPromptSections(userPrompt: string): PromptSection[] {
   if (text.includes('excel') || text.includes('.xlsx') || text.includes('.xls')) sections.push('excel');
   if (text.includes('linkedin') || text.includes('job search') || text.includes('jobs')) sections.push('linkedin');
   if (text.includes('whatsapp')) sections.push('whatsapp');
+  if (text.includes('current page context') || text.includes('cdp connected')) sections.push('browser');
 
   return [...new Set(sections)];
 }

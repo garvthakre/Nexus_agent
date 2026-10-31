@@ -1,0 +1,15 @@
+{
+  "name": "nexus-agent-suite",
+  "version": "1.0.0",
+  "description": "Nexus AI Desktop Automation Teammate",
+  "scripts": {
+    "server": "cd server && npm run dev",
+    "web": "cd web && npm run dev",
+    "desktop": "cd electron && npm start",
+    "chrome": "start-chrome.bat",
+    "dev": "concurrently \"npm run server\" \"npm run web\" \"npm run desktop\" \"npm run chrome\""
+  },
+  "devDependencies": {
+    "concurrently": "^10.0.6"
+  }
+}
